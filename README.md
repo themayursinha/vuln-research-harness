@@ -10,9 +10,11 @@ pins the target and success condition, an approach registry that prevents
 premature agent convergence, and an evidence ledger that records every state
 transition from hypothesis to reproduced impact.
 
-**Status: scaffold.** The campaign contract, approach registry, and evidence
-ledger are implemented and tested. The agent runner, adversarial validator,
-and sandbox integration are not built yet. See [docs/roadmap.md](docs/roadmap.md).
+**Status: foundation + controlled execution.** The campaign contract, approach
+registry, evidence ledger, snapshot manifest, capability gate, and the manual
+inbox round loop are implemented and tested. An automated agent runner, the
+container/microVM adapter, and the adversarial validator are not built yet.
+See [docs/roadmap.md](docs/roadmap.md) and [docs/campaigns.md](docs/campaigns.md).
 
 ## Why
 
@@ -51,7 +53,7 @@ local snapshots in isolated environments:
 - validation and disclosure phases may consult history, advisories, and
   public research.
 
-See [docs/safety.md](docs/safety.md). Running VRH against systems you do not
+See [docs/safety.md](docs/safety.md) and [docs/campaigns.md](docs/campaigns.md). Running VRH against systems you do not
 own or lack explicit written permission to test is out of scope and
 unsupported.
 
@@ -71,19 +73,32 @@ vrh init ./campaigns/mcp-filesystem-server
 # settings, or an undefined success condition)
 vrh validate ./campaigns/mcp-filesystem-server/campaign.yaml
 
-# (roadmap) run the campaign, resume it, export the evidence ledger
-# vrh run ./campaigns/mcp-filesystem-server/campaign.yaml
-# vrh ledger export ./campaigns/mcp-filesystem-server/
+# Pin the target source snapshot (manifest + normalized archive)
+vrh snapshot /path/to/target ./campaigns/mcp-filesystem-server
+
+# Manage approach families
+vrh families add ./campaigns/mcp-filesystem-server parser "validation ordering"
+vrh families list ./campaigns/mcp-filesystem-server
+
+# Run a bounded round: publish request envelopes, execute externally in
+# isolation, then ingest validated results
+vrh round plan ./campaigns/mcp-filesystem-server 4
+vrh round ingest ./campaigns/mcp-filesystem-server
 ```
 
 ## Repository layout
 
 ```
-cmd/vrh/            CLI entry point
+cmd/vrh/            CLI entry point (init, validate, snapshot, families, round)
 internal/contract/  campaign contract load/validate (YAML, digest-pinned)
 internal/registry/  approach family registry (convergence + blocked-path state)
 internal/ledger/    append-only evidence ledger (JSONL, hash-linked)
-docs/               method, safety model, contract reference, roadmap
+internal/manifest/  digest-pinned source snapshot (manifest + normalized archive)
+internal/capability/ executor capability gate (fail-closed admission)
+internal/worker/    structured request/result schema for research lanes
+internal/coordinator/ round state machine (plan + ingest)
+internal/executor/  manual inbox executor (v1; no target execution)
+docs/               method, safety model, contract reference, campaign layout, roadmap
 ```
 
 ## License

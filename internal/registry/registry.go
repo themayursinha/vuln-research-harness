@@ -87,6 +87,18 @@ func (r *Registry) Get(family string) (Approach, bool) {
 	return approach, ok
 }
 
+// Set replaces the stored approach for an existing family. The ledger
+// reconciliation uses it to restore attempt counts and statuses after a
+// crash; callers must only set families that already exist.
+func (r *Registry) Set(family string, approach Approach) error {
+	if _, ok := r.approaches[family]; !ok {
+		return fmt.Errorf("unknown approach family %q", family)
+	}
+	approach.Family = family
+	r.approaches[family] = approach
+	return nil
+}
+
 func (r *Registry) All() []Approach {
 	families := make([]string, 0, len(r.approaches))
 	for family := range r.approaches {
