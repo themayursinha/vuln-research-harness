@@ -104,3 +104,16 @@ docs/               method, safety model, contract reference, campaign layout, r
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Validation lane
+
+```bash
+# Run reproduction cases against the pinned snapshot
+vrh repro cases.yaml /path/to/snapshot
+
+# Verify network isolation before executing anything
+vrh verify-sandbox
+
+# Record an adversarial validation verdict for a finding
+vrh adversarial F1-json-bypass attempts.json "finding stands"
+```
