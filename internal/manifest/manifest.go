@@ -185,9 +185,11 @@ func Load(path string) (Manifest, error) {
 
 // Verify checks that sourceDir still matches the recorded snapshot exactly:
 // every recorded file must still be a regular file with the recorded digest,
-// and no file may have been added since the snapshot. Additions are rejected
-// because workers would otherwise see source content that is absent from the
-// pinned archive, and a newly added symlink could point outside the tree.
+// no file may have been added or removed, and the normalized archive rebuilt
+// from the tree must hash to the recorded archive digest. The archive check
+// closes the gap where manifest.json and the source are modified together:
+// per-file digests alone would then pass while the pinned snapshot digest in
+// the campaign contract no longer describes what workers actually see.
 func (m Manifest) Verify(sourceDir string) error {
 	current, err := walkRegularFiles(sourceDir)
 	if err != nil {
@@ -217,6 +219,21 @@ func (m Manifest) Verify(sourceDir string) error {
 		if !currentSet[rel] {
 			return fmt.Errorf("source changed: %s removed after snapshot", rel)
 		}
+	}
+	files := make([]FileDigest, 0, len(current))
+	for _, rel := range current {
+		data, err := os.ReadFile(filepath.Join(sourceDir, filepath.FromSlash(rel)))
+		if err != nil {
+			return fmt.Errorf("source changed: %s: %w", rel, err)
+		}
+		files = append(files, FileDigest{Path: rel, SHA256: digest(data), Size: int64(len(data))})
+	}
+	archive, err := normalizedArchive(sourceDir, files)
+	if err != nil {
+		return fmt.Errorf("source changed: rebuild archive: %w", err)
+	}
+	if rebuilt := digest(archive); rebuilt != m.ArchiveSHA {
+		return fmt.Errorf("source changed: rebuilt archive digest %s does not match pinned %s", rebuilt, m.ArchiveSHA)
 	}
 	return nil
 }

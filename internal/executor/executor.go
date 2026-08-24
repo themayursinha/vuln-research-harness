@@ -69,8 +69,15 @@ func (i *Inbox) Publish(request worker.Request) (string, error) {
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("check request: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return "", fmt.Errorf("write request: %w", err)
+	// Write via temp file + rename so a crash or short write can never leave
+	// a truncated envelope that would wedge the pending plan as a conflicting
+	// "already published" file.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return "", fmt.Errorf("write request temp file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return "", fmt.Errorf("replace request: %w", err)
 	}
 	return digest, nil
 }

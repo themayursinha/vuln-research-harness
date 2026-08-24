@@ -104,10 +104,21 @@ func readRequestFiles(requestsDir string) (map[string]requestFile, error) {
 			return nil, fmt.Errorf("%s: request id and family are required", entry.Name())
 		}
 		sum := sha256.Sum256(data)
-		files[request.ID] = requestFile{
+		record := requestFile{
 			family: request.Family,
 			digest: hex.EncodeToString(sum[:]),
 		}
+		if existing, dup := files[request.ID]; dup {
+			// Two files claiming the same request ID: one may be a tampered
+			// clone that sorts before the canonical name and would otherwise
+			// be silently overwritten. Workers could execute the clone while
+			// ingest verifies the canonical file, so refuse rather than pick.
+			if existing != record {
+				return nil, fmt.Errorf("two request envelopes define %s with different content; refusing to choose", request.ID)
+			}
+			continue
+		}
+		files[request.ID] = record
 	}
 	return files, nil
 }

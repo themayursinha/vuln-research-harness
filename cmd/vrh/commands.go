@@ -66,6 +66,12 @@ func familiesCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Reconcile BEFORE any mutation: a prior families command may have
+	// appended its ledger event but crashed before saving registry.json.
+	// Without this, a retry re-applies the mutation (duplicate
+	// family_reopened events inflate attempt counts) or rejects ledgered
+	// families as unknown after a registry loss.
+	reconcileRegistry(reg, events)
 	switch sub {
 	case "add":
 		if len(args) != 4 {
@@ -320,12 +326,35 @@ func roundPlanCmd(args []string) error {
 	if state.PublishedRounds == nil {
 		state.PublishedRounds = map[int]bool{}
 	}
+	// Reconstruct completion per round from the pending plan, not from the
+	// mere existence of a publication event: a round whose plan was only
+	// partially published (crash mid-loop) must NOT be flagged complete, or
+	// the retry below advances past it and strands the unpublished families.
+	byRound := map[int][]string{}
 	for _, event := range events {
 		if event.Type != "request_published" {
 			continue
 		}
 		if round, err := strconv.Atoi(event.Data["round"]); err == nil && round >= 1 {
+			byRound[round] = append(byRound[round], event.Data["family"])
+		}
+	}
+	for round, families := range byRound {
+		complete := true
+		if state.PendingRound == round && len(state.PendingPlan) > 0 {
+			families = state.PendingPlan
+		}
+		published := publishedIDs(events, round)
+		for _, family := range families {
+			if !published[fmt.Sprintf("%s--r%d", family, round)] {
+				complete = false
+				break
+			}
+		}
+		if complete {
 			state.PublishedRounds[round] = true
+		} else {
+			state.PublishedRounds[round] = false
 		}
 	}
 	coord, err := coordinator.NewState(maxWorkers)
