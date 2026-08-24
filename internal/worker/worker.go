@@ -70,6 +70,14 @@ func (r Request) Validate() error {
 	return nil
 }
 
+// ValidateSafeID ensures an identifier can be used as a single filename
+// component: IDs and family names become envelope filenames, so a family
+// like "../auth" or "cache poisoning" must never be allowed into request IDs
+// or the registry. Exported for registry.ValidateFamilyName.
+func ValidateSafeID(id string) error {
+	return validateSafeID(id)
+}
+
 // validateSafeID ensures an identifier can be used as a single filename
 // component. Request IDs become envelope filenames under inbox/requests/, so
 // a family like "../auth" must never be allowed to escape that directory.
@@ -116,6 +124,9 @@ func (r Result) Validate() error {
 	}
 	if r.Status == ResultFinding && len(r.Findings) == 0 {
 		return fmt.Errorf("finding result needs at least one finding")
+	}
+	if err := validateSafeID(r.RequestID); err != nil {
+		return fmt.Errorf("result request_id: %w", err)
 	}
 	return nil
 }

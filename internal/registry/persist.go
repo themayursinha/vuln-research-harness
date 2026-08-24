@@ -6,25 +6,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/themayursinha/vuln-research-harness/internal/worker"
 )
 
 // ValidateFamilyName rejects family names that cannot be used as safe path
-// components. Request IDs are derived as "<family>--r<round>" and become
-// envelope filenames under inbox/requests/, so a family containing path
-// separators or traversal segments would write envelopes outside the requests
-// directory. Call it wherever untrusted family names enter the system.
+// components or cannot form valid request IDs. Request IDs are derived as
+// "<family>--r<round>" and become envelope filenames under inbox/requests/,
+// so a family must satisfy exactly the character set that
+// worker.Request.Validate enforces on IDs — otherwise a family like
+// "cache poisoning" persists but every round plan retry fails at Publish.
 func ValidateFamilyName(family string) error {
-	if strings.TrimSpace(family) == "" || strings.ContainsAny(family, "/\\") ||
-		family == "." || family == ".." {
-		return fmt.Errorf("family %q must be a safe path component", family)
+	if err := worker.ValidateSafeID(family); err != nil {
+		return fmt.Errorf("family %q: %w", family, err)
 	}
 	for _, segment := range strings.Split(family, "--") {
 		if segment == "" || segment == "." || segment == ".." {
 			return fmt.Errorf("family %q must not contain empty, '.', or '..' segments split on '--'", family)
 		}
-	}
-	if strings.TrimSpace(family) != family {
-		return fmt.Errorf("family %q must not have leading or trailing whitespace", family)
 	}
 	return nil
 }

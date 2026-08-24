@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -21,6 +23,7 @@ func OutstandingFromLedger(inbox *Inbox, events []ledger.Event) (map[string]stri
 	dispatchedRaw := make(map[string]bool)
 	dispatched := make(map[string]string)
 	ingested := make(map[string]bool)
+	expectedDigest := make(map[string]string)
 	for _, event := range events {
 		switch event.Type {
 		case "request_published":
@@ -30,6 +33,9 @@ func OutstandingFromLedger(inbox *Inbox, events []ledger.Event) (map[string]stri
 			}
 			dispatchedRaw[event.ID] = true
 			dispatched[event.ID] = family
+			if digest := event.Data["envelope_sha256"]; digest != "" {
+				expectedDigest[event.ID] = digest
+			}
 		case "result_ingested":
 			// The result was already applied to the registry; its request
 			// must never re-enter the outstanding set, or a reopened family
@@ -45,36 +51,40 @@ func OutstandingFromLedger(inbox *Inbox, events []ledger.Event) (map[string]stri
 		return nil, err
 	}
 	outstanding := make(map[string]string)
-	for id, family := range dispatched {
-		envelopeFamily, ok := files[id]
-		if !ok {
-			continue // envelope not yet written; nothing to ingest
-		}
-		if envelopeFamily != family {
-			return nil, fmt.Errorf("request %s envelope says family %q but ledger recorded %q", id, envelopeFamily, family)
-		}
-		outstanding[id] = family
-	}
-	for id := range files {
-		// A consumed request's envelope file may legitimately remain if the
-		// worker re-dropped it after ingestion; only unpublished files are
-		// an error.
-		if _, isDispatched := dispatchedRaw[id]; !isDispatched {
+	for id, file := range files {
+		family, isDispatched := dispatched[id]
+		if !isDispatched {
+			if dispatchedRaw[id] {
+				continue // consumed request's envelope re-dropped; not fatal
+			}
 			return nil, fmt.Errorf("request file for %s has no request_published event; refusing to treat it as dispatched", id)
 		}
+		if file.family != family {
+			return nil, fmt.Errorf("request %s envelope says family %q but ledger recorded %q", id, file.family, family)
+		}
+		if want, ok := expectedDigest[id]; ok && file.digest != want {
+			return nil, fmt.Errorf("request %s envelope digest mismatch: assignment altered after publication", id)
+		}
+		outstanding[id] = family
 	}
 	return outstanding, nil
 }
 
+type requestFile struct {
+	family string
+	digest string
+}
+
 // readRequestFiles reads every .json envelope under requestsDir and maps the
-// ID inside the content to the recorded family, so filenames never decide
-// identity.
-func readRequestFiles(requestsDir string) (map[string]string, error) {
+// ID inside the content to the recorded family and the digest of the complete
+// serialized envelope, so filenames never decide identity and post-publication
+// tampering with assignment fields is detectable.
+func readRequestFiles(requestsDir string) (map[string]requestFile, error) {
 	entries, err := os.ReadDir(requestsDir)
 	if err != nil {
 		return nil, fmt.Errorf("read requests: %w", err)
 	}
-	files := make(map[string]string)
+	files := make(map[string]requestFile)
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -93,7 +103,11 @@ func readRequestFiles(requestsDir string) (map[string]string, error) {
 		if strings.TrimSpace(request.ID) == "" || strings.TrimSpace(request.Family) == "" {
 			return nil, fmt.Errorf("%s: request id and family are required", entry.Name())
 		}
-		files[request.ID] = request.Family
+		sum := sha256.Sum256(data)
+		files[request.ID] = requestFile{
+			family: request.Family,
+			digest: hex.EncodeToString(sum[:]),
+		}
 	}
 	return files, nil
 }

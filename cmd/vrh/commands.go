@@ -416,10 +416,11 @@ func roundPlanCmd(args []string) error {
 			Family: family,
 			Goal:   "investigate " + family + " for primitives matching the campaign success criterion",
 		}
-		if err := inbox.Publish(request); err != nil {
+		digest, err := inbox.Publish(request)
+		if err != nil {
 			return err
 		}
-		if _, err := ldg.Append(requestID, "request_published", map[string]string{"round": fmt.Sprint(coord.Round), "family": family}); err != nil {
+		if _, err := ldg.Append(requestID, "request_published", map[string]string{"round": fmt.Sprint(coord.Round), "family": family, "envelope_sha256": digest}); err != nil {
 			return err
 		}
 	}
@@ -431,16 +432,25 @@ func roundPlanCmd(args []string) error {
 		return err
 	}
 	reconcileRegistry(reg, events)
-	// Mark the round as published and clear the pending plan BEFORE saving the
-	// registry: if a crash lands after this write but before reg.Save, the
-	// next command rebuilds registry.json from the intact ledger. The reverse
-	// order would leave a stale state that re-dispatches a recorded round.
-	state.PublishedRounds[coord.Round] = true
-	state.Round = coord.Round + 1
-	state.PendingRound = 0
-	state.PendingPlan = nil
-	if err := saveRoundState(files["state"], state); err != nil {
-		return err
+	// Only mark the round published when the ENTIRE plan is on the ledger.
+	// A partial publication (crash mid-loop) leaves the flag unset so the
+	// retry resumes the same round via the pending plan instead of starting
+	// round N+1 and stranding the unpublished families.
+	fullyPublished := true
+	for _, family := range state.PendingPlan {
+		if !publishedIDs(events, coord.Round)[fmt.Sprintf("%s--r%d", family, coord.Round)] {
+			fullyPublished = false
+			break
+		}
+	}
+	if fullyPublished {
+		state.PublishedRounds[coord.Round] = true
+		state.Round = coord.Round + 1
+		state.PendingRound = 0
+		state.PendingPlan = nil
+		if err := saveRoundState(files["state"], state); err != nil {
+			return err
+		}
 	}
 	if err := reg.Save(dir); err != nil {
 		return err
@@ -523,6 +533,20 @@ func roundIngestCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Consume ledgered leftovers BEFORE computing the outstanding set: a
+	// crashed ingest can leave result envelopes in results/ whose requests
+	// already carry a result_ingested event. Those envelopes are no longer
+	// outstanding, so CollectResults would reject the batch before the
+	// leftover filter below could skip them. Archiving them first keeps the
+	// recovery path reachable.
+	ingested := ingestedIDs(events)
+	if leftovers, err := inbox.LedgeredLeftovers(ingested); err != nil {
+		return err
+	} else if len(leftovers) > 0 {
+		if err := inbox.Consume(leftovers); err != nil {
+			return err
+		}
+	}
 	outstanding, err := executor.OutstandingFromLedger(inbox, events)
 	if err != nil {
 		return err
@@ -535,7 +559,6 @@ func roundIngestCmd(args []string) error {
 		return err
 	}
 
-	ingested := ingestedIDs(events)
 	var fresh []worker.Result
 	for _, item := range collected {
 		if ingested[item.Result.RequestID] {

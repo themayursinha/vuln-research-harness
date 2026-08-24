@@ -7,6 +7,8 @@ package executor
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,28 +46,33 @@ func NewInbox(dir string) (*Inbox, error) {
 
 // Publish writes one request as a JSON envelope. Publish is idempotent:
 // re-publishing an identical envelope (after a crashed round plan) succeeds
-// silently, while a conflicting envelope is refused.
-func (i *Inbox) Publish(request worker.Request) error {
+// silently, while a conflicting envelope is refused. The returned digest
+// covers the complete serialized envelope, so callers can record it in the
+// ledger and later detect any post-publication tampering with assignment
+// fields (goal, context, round), not just id and family.
+func (i *Inbox) Publish(request worker.Request) (string, error) {
 	if err := request.Validate(); err != nil {
-		return err
+		return "", err
 	}
 	data, err := json.MarshalIndent(request, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode request: %w", err)
+		return "", fmt.Errorf("encode request: %w", err)
 	}
+	sum := sha256.Sum256(data)
+	digest := hex.EncodeToString(sum[:])
 	path := filepath.Join(i.dir, "requests", request.ID+".json")
 	if existing, err := os.ReadFile(path); err == nil {
 		if bytes.Equal(existing, data) {
-			return nil // already published, identical — retry-safe
+			return digest, nil // already published, identical — retry-safe
 		}
-		return fmt.Errorf("request %s already published with different content", request.ID)
+		return "", fmt.Errorf("request %s already published with different content", request.ID)
 	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("check request: %w", err)
+		return "", fmt.Errorf("check request: %w", err)
 	}
 	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("write request: %w", err)
+		return "", fmt.Errorf("write request: %w", err)
 	}
-	return nil
+	return digest, nil
 }
 
 // consumedRequestIDs returns every request ID whose envelope already sits in
@@ -190,6 +197,37 @@ func (i *Inbox) CollectResults(gate *capability.Gate, outstanding map[string]str
 		return nil, fmt.Errorf("no result envelopes found in %s", i.dir)
 	}
 	return collected, nil
+}
+
+// LedgeredLeftovers returns collected envelopes for requests that already
+// carry a result_ingested event: a crashed ingest can leave them in results/
+// where they would otherwise be rejected as non-outstanding before the
+// recovery path could archive them.
+func (i *Inbox) LedgeredLeftovers(ingested map[string]bool) ([]Collected, error) {
+	entries, err := os.ReadDir(filepath.Join(i.dir, "results"))
+	if err != nil {
+		return nil, fmt.Errorf("read results: %w", err)
+	}
+	var leftovers []Collected
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(i.dir, "results", entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", entry.Name(), err)
+		}
+		var envelope struct {
+			Result worker.Result `json:"result"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", entry.Name(), err)
+		}
+		if ingested[envelope.Result.RequestID] {
+			leftovers = append(leftovers, Collected{Filename: entry.Name(), Result: envelope.Result})
+		}
+	}
+	return leftovers, nil
 }
 
 // Consume marks collected envelopes as ingested by moving the exact files

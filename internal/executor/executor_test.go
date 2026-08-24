@@ -44,15 +44,15 @@ func TestPublishIsIdempotentForIdenticalRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := worker.Request{ID: "parser--r1", Round: 1, Family: "parser", Goal: "map request validation order"}
-	if err := inbox.Publish(request); err != nil {
+	if _, err := inbox.Publish(request); err != nil {
 		t.Fatal(err)
 	}
-	if err := inbox.Publish(request); err != nil {
+	if _, err := inbox.Publish(request); err != nil {
 		t.Fatalf("identical re-publish must succeed (retry-safe): %v", err)
 	}
 	conflicting := request
 	conflicting.Goal = "different goal"
-	if err := inbox.Publish(conflicting); err == nil {
+	if _, err := inbox.Publish(conflicting); err == nil {
 		t.Fatal("conflicting re-publish unexpectedly succeeded")
 	}
 }
@@ -62,7 +62,7 @@ func TestCollectRejectsFailingCapabilityGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := inbox.Publish(worker.Request{ID: "cache--r1", Round: 1, Family: "cache", Goal: "g"}); err != nil {
+	if _, err := inbox.Publish(worker.Request{ID: "cache--r1", Round: 1, Family: "cache", Goal: "g"}); err != nil {
 		t.Fatal(err)
 	}
 	claims := satisfiedClaims()
@@ -100,7 +100,7 @@ func TestConsumeUsesCollectedFilename(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+	if _, err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
 		t.Fatal(err)
 	}
 	// Worker follows the flow but names the envelope result.json instead of
@@ -146,7 +146,7 @@ func TestConsumePreventsReingestAfterReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+	if _, err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
 		t.Fatal(err)
 	}
 	writeResultEnvelope(t, inbox, "auth--r1.json", worker.Result{
@@ -206,7 +206,7 @@ func TestOutstandingFromLedgerRejectsTamperedFamily(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+	if _, err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
 		t.Fatal(err)
 	}
 	events := []ledger.Event{{
@@ -234,7 +234,7 @@ func TestConsumeRejectsDuplicateRequestIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+	if _, err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
 		t.Fatal(err)
 	}
 	writeResultEnvelope(t, inbox, "auth--r1.json", worker.Result{
@@ -266,7 +266,7 @@ func TestOutstandingFromLedgerExcludesIngestedRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+	if _, err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
 		t.Fatal(err)
 	}
 	events := []ledger.Event{
@@ -287,7 +287,7 @@ func TestOutstandingFromLedgerAllowsRedroppedConsumedEnvelopeFile(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+	if _, err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
 		t.Fatal(err)
 	}
 	events := []ledger.Event{
