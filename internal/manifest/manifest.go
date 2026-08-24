@@ -57,6 +57,18 @@ func Snapshot(sourceDir, outDir string) (Manifest, error) {
 			}
 			return nil
 		}
+		// Reject anything that is not a plain regular file. Symlinks are the
+		// dangerous case: os.ReadFile would follow a link such as
+		// ".env -> /home/user/.ssh/id_rsa" and bake data from outside the
+		// source root into the manifest and archive. Devices, FIFOs and
+		// sockets would hang or misbehave on read, so they are refused too.
+		if entry.Type()&fs.ModeType != 0 {
+			rel, relErr := filepath.Rel(sourceDir, path)
+			if relErr != nil {
+				rel = path
+			}
+			return fmt.Errorf("refusing to snapshot non-regular file: %s", rel)
+		}
 		rel, err := filepath.Rel(sourceDir, path)
 		if err != nil {
 			return err
@@ -162,12 +174,20 @@ func Load(path string) (Manifest, error) {
 // Verify checks that sourceDir still hashes to the recorded per-file digests.
 func (m Manifest) Verify(sourceDir string) error {
 	for _, file := range m.Files {
-		data, err := os.ReadFile(filepath.Join(sourceDir, filepath.FromSlash(file.Path)))
+		full := filepath.Join(sourceDir, filepath.FromSlash(file.Path))
+		info, err := os.Lstat(full)
 		if err != nil {
 			return fmt.Errorf("source changed: %s: %w", file.Path, err)
 		}
-		digest := digest(data)
-		if digest != file.SHA256 {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("source changed: %s is no longer a regular file", file.Path)
+		}
+		data, err := os.ReadFile(full)
+		if err != nil {
+			return fmt.Errorf("source changed: %s: %w", file.Path, err)
+		}
+		sum := digest(data)
+		if sum != file.SHA256 {
 			return fmt.Errorf("source changed: %s digest mismatch", file.Path)
 		}
 	}

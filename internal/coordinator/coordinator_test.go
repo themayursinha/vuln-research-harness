@@ -41,6 +41,36 @@ func TestPlanFavorsNeglectedFamilies(t *testing.T) {
 	}
 }
 
+func TestIngestRequiresExactOutstandingRequestID(t *testing.T) {
+	reg := setupRegistry(t)
+	state, err := NewState(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outstanding := map[string]string{
+		"auth--r1":  "auth",
+		"cache--r1": "cache",
+	}
+
+	// Invented IDs are rejected even when they share a family prefix.
+	if err := state.Ingest(reg, outstanding, []worker.Result{{
+		RequestID: "auth--never-dispatched",
+		Status:    worker.ResultProgress,
+		Summary:   "invented",
+	}}); err == nil {
+		t.Fatal("invented request id unexpectedly ingested")
+	}
+
+	// Overlapping prefixes: auth--oauth--r1 must NOT match family "auth".
+	if err := state.Ingest(reg, outstanding, []worker.Result{{
+		RequestID: "auth--oauth--r1",
+		Status:    worker.ResultProgress,
+		Summary:   "wrong family",
+	}}); err == nil {
+		t.Fatal("overlapping prefix id unexpectedly ingested")
+	}
+}
+
 func TestIngestBlocksFamilyAndAdvancesRound(t *testing.T) {
 	reg := setupRegistry(t)
 	state, err := NewState(3)
@@ -50,13 +80,18 @@ func TestIngestBlocksFamilyAndAdvancesRound(t *testing.T) {
 	if _, err := state.Plan(reg); err != nil {
 		t.Fatal(err)
 	}
+	outstanding := map[string]string{
+		"parser--r1": "parser",
+		"auth--r1":   "auth",
+		"cache--r1":  "cache",
+	}
 	results := []worker.Result{{
 		RequestID:   "auth--r1",
 		Status:      worker.ResultBlocked,
 		Summary:     "no reachable primitive",
 		BlockReason: "permission callback runs before sink",
 	}}
-	if err := state.Ingest(reg, results); err != nil {
+	if err := state.Ingest(reg, outstanding, results); err != nil {
 		t.Fatal(err)
 	}
 	if state.Round != 2 {
@@ -77,18 +112,13 @@ func TestIngestBlocksFamilyAndAdvancesRound(t *testing.T) {
 	}
 }
 
-func TestIngestRejectsUnknownRequest(t *testing.T) {
+func TestIngestRejectsEmptyOutstanding(t *testing.T) {
 	reg := setupRegistry(t)
-	state, err := NewState(3)
+	state, err := NewState(1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = state.Ingest(reg, []worker.Result{{
-		RequestID: "ghost--r1",
-		Status:    worker.ResultProgress,
-		Summary:   "working",
-	}})
-	if err == nil {
-		t.Fatal("unknown request id unexpectedly ingested")
+	if err := state.Ingest(reg, nil, nil); err == nil {
+		t.Fatal("ingest with no outstanding requests unexpectedly accepted")
 	}
 }

@@ -35,6 +35,15 @@ vrh round plan campaigns/<name> 3      # publishes request envelopes
 vrh round ingest campaigns/<name>      # verifies gate + schema, updates registry
 ```
 
+`round plan` and `round ingest` both run the **admission gate** first: the
+contract must load and validate, the campaign `source_snapshot` must equal
+the manifest digest, and the source tree must still verify against the
+manifest. A directory with families but no valid authorized contract never
+dispatches work. `round plan` is retry-safe: a crashed plan resumes by
+skipping already-published requests. Ingested result envelopes move to
+`inbox/results/consumed/`, so a stale blocked result can never re-block a
+reopened family.
+
 ## Result envelopes
 
 Workers (human or agent) answer a request by writing an envelope into
@@ -60,4 +69,5 @@ Workers (human or agent) answer a request by writing an envelope into
 `vrh round ingest` rejects the whole batch if any envelope fails the
 capability gate or the result schema. Statuses: `progress`, `blocked`,
 `finding`, `refuted`. Findings must carry evidence paths; blocked results
-must carry a reason.
+must carry a reason. A result must answer the exact ID of an outstanding
+request; invented IDs and prefix-based family guesses are rejected.

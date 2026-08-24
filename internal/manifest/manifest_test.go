@@ -82,3 +82,40 @@ func TestLoadRejectsIncompleteManifest(t *testing.T) {
 		t.Fatal("incomplete manifest unexpectedly loaded")
 	}
 }
+
+func TestSnapshotRejectsSymlinks(t *testing.T) {
+	src := t.TempDir()
+	secret := filepath.Join(t.TempDir(), "outside-secret.txt")
+	if err := os.WriteFile(secret, []byte("sensitive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(src, ".env")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Snapshot(src, t.TempDir()); err == nil {
+		t.Fatal("snapshot followed a symlink instead of rejecting it")
+	}
+}
+
+func TestVerifyRejectsNonRegularFiles(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Snapshot(src, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(src, "main.go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/hostname", filepath.Join(src, "main.go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Verify(src); err == nil {
+		t.Fatal("verify accepted a symlink replacement")
+	}
+}

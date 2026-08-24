@@ -74,21 +74,25 @@ func (s *State) Plan(reg *registry.Registry) (PlanResult, error) {
 	return result, nil
 }
 
-// Ingest applies a batch of worker results to the registry. Blocked results
-// block the family with the stated reason; progress/refuted/finding results
-// leave the family active (a finding is a validated claim, not a reason to
-// stop searching the family).
-func (s *State) Ingest(reg *registry.Registry, results []worker.Result) error {
+// Ingest applies a batch of worker results to the registry. Every result must
+// name the exact ID of an outstanding request in outstanding; invented IDs
+// and prefix-based family guesses are rejected. Blocked results block their
+// family; progress/refuted/finding results leave the family active (a finding
+// is a validated claim, not a reason to stop searching the family).
+func (s *State) Ingest(reg *registry.Registry, outstanding map[string]string, results []worker.Result) error {
+	if len(outstanding) == 0 {
+		return fmt.Errorf("no outstanding requests; ingest nothing")
+	}
 	for _, result := range results {
 		if err := result.Validate(); err != nil {
 			return err
 		}
+		if _, ok := outstanding[result.RequestID]; !ok {
+			return fmt.Errorf("result %q does not match any outstanding request", result.RequestID)
+		}
 	}
 	for _, result := range results {
-		family := familyFor(reg, result.RequestID)
-		if family == "" {
-			return fmt.Errorf("result %q references no known family", result.RequestID)
-		}
+		family := outstanding[result.RequestID]
 		if result.Status == worker.ResultBlocked {
 			if err := reg.Block(family, result.BlockReason); err != nil {
 				return err
@@ -97,22 +101,4 @@ func (s *State) Ingest(reg *registry.Registry, results []worker.Result) error {
 	}
 	s.Round++
 	return nil
-}
-
-// familyFor maps a result request id back to a registry family. Request ids
-// use the "<family>--<suffix>" convention produced by BuildRequests.
-func familyFor(reg *registry.Registry, requestID string) string {
-	for _, approach := range reg.All() {
-		if hasPrefix(requestID, approach.Family+"--") {
-			return approach.Family
-		}
-	}
-	return ""
-}
-
-func hasPrefix(s, prefix string) bool {
-	if len(s) < len(prefix) {
-		return false
-	}
-	return s[:len(prefix)] == prefix
 }

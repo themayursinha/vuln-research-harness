@@ -36,6 +36,27 @@ func TestAppendAndReopen(t *testing.T) {
 	}
 }
 
+func TestIDsReportsRecordedEvents(t *testing.T) {
+	path := t.TempDir() + "/evidence.jsonl"
+	ledger, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.Append("req-1", "request_published", nil); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := ledger.IDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ids["request_published"]["req-1"] {
+		t.Fatalf("recorded id missing from IDs(): %v", ids)
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOpenRejectsTamperedLedger(t *testing.T) {
 	path := t.TempDir() + "/evidence.jsonl"
 	ledger, err := Open(path)
