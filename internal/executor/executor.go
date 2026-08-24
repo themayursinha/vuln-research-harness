@@ -68,11 +68,46 @@ func (i *Inbox) Publish(request worker.Request) error {
 	return nil
 }
 
+// consumedRequestIDs returns every request ID whose envelope already sits in
+// results/consumed/. Keys are read from the envelope content, not the
+// filename, so a worker that names its file something other than
+// <request_id>.json still marks the request consumed.
+func (i *Inbox) consumedRequestIDs() (map[string]bool, error) {
+	consumed := make(map[string]bool)
+	entries, err := os.ReadDir(filepath.Join(i.dir, "results", "consumed"))
+	if err != nil {
+		return nil, fmt.Errorf("read consumed: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(i.dir, "results", "consumed", entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", entry.Name(), err)
+		}
+		var envelope struct {
+			Result worker.Result `json:"result"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			continue // unreadable leftovers do not change outstanding state
+		}
+		if envelope.Result.RequestID != "" {
+			consumed[envelope.Result.RequestID] = true
+		}
+	}
+	return consumed, nil
+}
+
 // OutstandingRequests returns request IDs that have been published but not
-// yet consumed by an ingest, mapped to their family. Consumed results move
+// yet consumed by an ingest, mapped to their family. Consumed envelopes move
 // to results/consumed/, so an old blocked result can never re-block a family
 // after it was reopened.
 func (i *Inbox) OutstandingRequests() (map[string]string, error) {
+	consumed, err := i.consumedRequestIDs()
+	if err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(filepath.Join(i.dir, "requests"))
 	if err != nil {
 		return nil, fmt.Errorf("read requests: %w", err)
@@ -82,9 +117,6 @@ func (i *Inbox) OutstandingRequests() (map[string]string, error) {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(i.dir, "results", "consumed", entry.Name())); err == nil {
-			continue // already ingested
-		}
 		data, err := os.ReadFile(filepath.Join(i.dir, "requests", entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", entry.Name(), err)
@@ -93,14 +125,27 @@ func (i *Inbox) OutstandingRequests() (map[string]string, error) {
 		if err := json.Unmarshal(data, &request); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", entry.Name(), err)
 		}
+		if consumed[request.ID] {
+			continue // already ingested
+		}
 		outstanding[request.ID] = request.Family
 	}
 	return outstanding, nil
 }
 
+// Collected is one accepted result envelope together with the file it came
+// from, so consumption can act on the exact file that was read even when a
+// worker names the envelope something other than <request_id>.json.
+type Collected struct {
+	Filename string
+	Result   worker.Result
+}
+
 // CollectResults reads result envelopes, verifies the capability gate and
-// schema, and accepts only results that answer an outstanding request.
-func (i *Inbox) CollectResults(gate *capability.Gate, outstanding map[string]string) ([]worker.Result, error) {
+// schema, and accepts only results that answer an outstanding request. It
+// returns the results together with their filenames so Consume can archive
+// exactly the files that were read.
+func (i *Inbox) CollectResults(gate *capability.Gate, outstanding map[string]string) ([]Collected, error) {
 	if len(outstanding) == 0 {
 		return nil, fmt.Errorf("no outstanding requests; nothing to collect")
 	}
@@ -108,7 +153,7 @@ func (i *Inbox) CollectResults(gate *capability.Gate, outstanding map[string]str
 	if err != nil {
 		return nil, fmt.Errorf("read results: %w", err)
 	}
-	var results []worker.Result
+	var collected []Collected
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -134,29 +179,30 @@ func (i *Inbox) CollectResults(gate *capability.Gate, outstanding map[string]str
 		if _, ok := outstanding[envelope.Result.RequestID]; !ok {
 			return nil, fmt.Errorf("result %q in %s does not answer an outstanding request", envelope.Result.RequestID, entry.Name())
 		}
-		results = append(results, envelope.Result)
+		collected = append(collected, Collected{Filename: entry.Name(), Result: envelope.Result})
 	}
-	if len(results) == 0 {
+	if len(collected) == 0 {
 		return nil, fmt.Errorf("no result envelopes found in %s", i.dir)
 	}
-	return results, nil
+	return collected, nil
 }
 
-// Consume marks results as ingested by moving their envelopes to
-// results/consumed/. Envelopes without a matching request file are moved
-// too, so stray results cannot linger and poison a later round.
-func (i *Inbox) Consume(requestIDs []string) error {
-	for _, id := range requestIDs {
-		name := id + ".json"
-		src := filepath.Join(i.dir, "results", name)
+// Consume marks collected envelopes as ingested by moving the exact files
+// that were read to results/consumed/. Consumed request IDs are excluded
+// from OutstandingRequests, so a stale blocked result can never re-block a
+// family after it was reopened.
+func (i *Inbox) Consume(collected []Collected) error {
+	for _, item := range collected {
+		src := filepath.Join(i.dir, "results", item.Filename)
+		dst := filepath.Join(i.dir, "results", "consumed", item.Filename)
 		if _, err := os.Stat(src); err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return fmt.Errorf("stat %s: %w", name, err)
+			return fmt.Errorf("stat %s: %w", item.Filename, err)
 		}
-		if err := os.Rename(src, filepath.Join(i.dir, "results", "consumed", name)); err != nil {
-			return fmt.Errorf("consume %s: %w", name, err)
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("consume %s: %w", item.Filename, err)
 		}
 	}
 	return nil

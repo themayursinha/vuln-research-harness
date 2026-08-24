@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/themayursinha/vuln-research-harness/internal/ledger"
 	"github.com/themayursinha/vuln-research-harness/internal/registry"
 	"github.com/themayursinha/vuln-research-harness/internal/worker"
 )
@@ -100,5 +101,55 @@ func (s *State) Ingest(reg *registry.Registry, outstanding map[string]string, re
 		}
 	}
 	s.Round++
+	return nil
+}
+
+// ReconcileFromLedger replays the ledger's block and reopen events in
+// chronological order and restores each family's final authority state, so
+// state is never lost by a crash between the ledger append and the registry
+// save. A family_reopened event supersedes earlier blocks; a later block
+// supersedes earlier reopens. Exhausted families are never downgraded:
+// exhaustion is a terminal human decision the ledger does not record.
+func ReconcileFromLedger(reg *registry.Registry, events []ledger.Event) error {
+	blocked := make(map[string]string)
+	touched := make(map[string]bool)
+	for _, event := range events {
+		family := event.Data["family"]
+		if family == "" {
+			continue
+		}
+		switch {
+		case event.Type == "family_reopened":
+			delete(blocked, family)
+			touched[family] = true
+		case event.Type == "family_blocked":
+			blocked[family] = event.Data["reason"]
+			touched[family] = true
+		case event.Type == "result_ingested" && event.Data["status"] == string(worker.ResultBlocked):
+			blocked[family] = event.Data["block_reason"]
+			touched[family] = true
+		}
+	}
+	for family := range touched {
+		approach, ok := reg.Get(family)
+		if !ok || approach.Status == registry.Exhausted {
+			continue
+		}
+		if reason, isBlocked := blocked[family]; isBlocked {
+			if err := reg.Block(family, reason); err != nil {
+				return err
+			}
+			continue
+		}
+		// Ledger says active (reopened after the recorded block) but the
+		// materialized view may still say blocked: restore active state.
+		if approach.Status == registry.Blocked {
+			approach.Status = registry.Active
+			approach.BlockReason = ""
+			if err := reg.Set(family, approach); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }

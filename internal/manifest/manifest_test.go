@@ -100,6 +100,23 @@ func TestSnapshotRejectsSymlinks(t *testing.T) {
 	}
 }
 
+func TestVerifyDetectsAddedFiles(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Snapshot(src, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "extra.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Verify(src); err == nil {
+		t.Fatal("verify accepted a file added after the snapshot")
+	}
+}
+
 func TestVerifyRejectsNonRegularFiles(t *testing.T) {
 	src := t.TempDir()
 	if err := os.WriteFile(filepath.Join(src, "main.go"), []byte("package main"), 0600); err != nil {

@@ -45,49 +45,22 @@ func Snapshot(sourceDir, outDir string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("create campaign dir: %w", err)
 	}
 
-	var files []FileDigest
-	err = filepath.WalkDir(sourceDir, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			name := entry.Name()
-			if name == ".git" || name == ".worktrees" || name == "node_modules" || name == "__pycache__" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// Reject anything that is not a plain regular file. Symlinks are the
-		// dangerous case: os.ReadFile would follow a link such as
-		// ".env -> /home/user/.ssh/id_rsa" and bake data from outside the
-		// source root into the manifest and archive. Devices, FIFOs and
-		// sockets would hang or misbehave on read, so they are refused too.
-		if entry.Type()&fs.ModeType != 0 {
-			rel, relErr := filepath.Rel(sourceDir, path)
-			if relErr != nil {
-				rel = path
-			}
-			return fmt.Errorf("refusing to snapshot non-regular file: %s", rel)
-		}
-		rel, err := filepath.Rel(sourceDir, path)
+	rels, err := walkRegularFiles(sourceDir)
+	if err != nil {
+		return Manifest{}, err
+	}
+	files := make([]FileDigest, 0, len(rels))
+	for _, rel := range rels {
+		data, err := os.ReadFile(filepath.Join(sourceDir, filepath.FromSlash(rel)))
 		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", rel, err)
+			return Manifest{}, fmt.Errorf("read %s: %w", rel, err)
 		}
 		files = append(files, FileDigest{
-			Path:   filepath.ToSlash(rel),
+			Path:   rel,
 			SHA256: digest(data),
 			Size:   int64(len(data)),
 		})
-		return nil
-	})
-	if err != nil {
-		return Manifest{}, fmt.Errorf("walk source: %w", err)
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 
 	archive, err := normalizedArchive(sourceDir, files)
 	if err != nil {
@@ -112,6 +85,45 @@ func Snapshot(sourceDir, outDir string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("write archive: %w", err)
 	}
 	return manifest, nil
+}
+
+// walkRegularFiles returns the slash-separated relative paths of every plain
+// regular file under sourceDir, applying the snapshot exclusions. It refuses
+// non-regular entries (symlinks, devices, FIFOs, sockets) so a link such as
+// ".env -> /home/user/.ssh/id_rsa" can never be read into a snapshot, and so
+// entries added later are detected by Verify.
+func walkRegularFiles(sourceDir string) ([]string, error) {
+	var rels []string
+	err := filepath.WalkDir(sourceDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			name := entry.Name()
+			if name == ".git" || name == ".worktrees" || name == "node_modules" || name == "__pycache__" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Type()&fs.ModeType != 0 {
+			rel, relErr := filepath.Rel(sourceDir, path)
+			if relErr != nil {
+				rel = path
+			}
+			return fmt.Errorf("refusing to snapshot non-regular file: %s", rel)
+		}
+		rel, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+		rels = append(rels, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk source: %w", err)
+	}
+	sort.Strings(rels)
+	return rels, nil
 }
 
 func digest(data []byte) string {
@@ -171,24 +183,39 @@ func Load(path string) (Manifest, error) {
 	return manifest, nil
 }
 
-// Verify checks that sourceDir still hashes to the recorded per-file digests.
+// Verify checks that sourceDir still matches the recorded snapshot exactly:
+// every recorded file must still be a regular file with the recorded digest,
+// and no file may have been added since the snapshot. Additions are rejected
+// because workers would otherwise see source content that is absent from the
+// pinned archive, and a newly added symlink could point outside the tree.
 func (m Manifest) Verify(sourceDir string) error {
+	current, err := walkRegularFiles(sourceDir)
+	if err != nil {
+		return fmt.Errorf("source changed: %w", err)
+	}
+	recorded := make(map[string]FileDigest, len(m.Files))
 	for _, file := range m.Files {
-		full := filepath.Join(sourceDir, filepath.FromSlash(file.Path))
-		info, err := os.Lstat(full)
-		if err != nil {
-			return fmt.Errorf("source changed: %s: %w", file.Path, err)
+		recorded[file.Path] = file
+	}
+	currentSet := make(map[string]bool, len(current))
+	for _, rel := range current {
+		currentSet[rel] = true
+		file, ok := recorded[rel]
+		if !ok {
+			return fmt.Errorf("source changed: %s added after snapshot", rel)
 		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("source changed: %s is no longer a regular file", file.Path)
-		}
+		full := filepath.Join(sourceDir, filepath.FromSlash(rel))
 		data, err := os.ReadFile(full)
 		if err != nil {
-			return fmt.Errorf("source changed: %s: %w", file.Path, err)
+			return fmt.Errorf("source changed: %s: %w", rel, err)
 		}
-		sum := digest(data)
-		if sum != file.SHA256 {
-			return fmt.Errorf("source changed: %s digest mismatch", file.Path)
+		if sum := digest(data); sum != file.SHA256 {
+			return fmt.Errorf("source changed: %s digest mismatch", rel)
+		}
+	}
+	for rel := range recorded {
+		if !currentSet[rel] {
+			return fmt.Errorf("source changed: %s removed after snapshot", rel)
 		}
 	}
 	return nil

@@ -38,11 +38,20 @@ vrh round ingest campaigns/<name>      # verifies gate + schema, updates registr
 `round plan` and `round ingest` both run the **admission gate** first: the
 contract must load and validate, the campaign `source_snapshot` must equal
 the manifest digest, and the source tree must still verify against the
-manifest. A directory with families but no valid authorized contract never
-dispatches work. `round plan` is retry-safe: a crashed plan resumes by
-skipping already-published requests. Ingested result envelopes move to
-`inbox/results/consumed/`, so a stale blocked result can never re-block a
-reopened family.
+manifest — including a check that no file was added or removed since the
+snapshot. A directory with families but no valid authorized contract never
+dispatches work.
+
+The append-only ledger is the **single source of truth**; `registry.json`
+and `state.json` are materialized views reconstructed from it. Every command
+reconciles before acting, so a crash at any point — including a lost
+`registry.json` — cannot strand a campaign or lose a blocked/attempt state.
+`round plan` records its family set durably before publishing anything, so a
+retry after a crash publishes the exact original set rather than recomputing
+from inflated attempt counts. Ingested result envelopes move to
+`inbox/results/consumed/` (keyed by the request ID inside the envelope, not
+the filename), so a stale blocked result can never re-block a reopened
+family.
 
 ## Result envelopes
 

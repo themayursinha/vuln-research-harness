@@ -49,6 +49,30 @@ func Open(path string) (*Ledger, error) {
 
 func (l *Ledger) Close() error { return l.file.Close() }
 
+// Events returns every recorded event in order. Callers use it to reconcile
+// state after a crash: the ledger is the single source of truth.
+func (l *Ledger) Events() ([]Event, error) {
+	if _, err := l.file.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek ledger: %w", err)
+	}
+	var events []Event
+	scanner := bufio.NewScanner(l.file)
+	for scanner.Scan() {
+		var event Event
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			return nil, fmt.Errorf("ledger: malformed event: %w", err)
+		}
+		events = append(events, event)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read ledger: %w", err)
+	}
+	if _, err := l.file.Seek(0, io.SeekEnd); err != nil {
+		return nil, fmt.Errorf("seek ledger end: %w", err)
+	}
+	return events, nil
+}
+
 // IDs returns the set of event IDs already recorded, keyed by event type.
 // Callers use it to make ingestion idempotent: a result whose ID already has
 // a result_ingested event has been processed before and must not be applied
