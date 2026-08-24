@@ -1,0 +1,19 @@
+# Binaries
+vrh
+dist/
+
+# Go
+*.test
+*.out
+
+# Campaign working state (never commit target sources or raw evidence)
+campaigns/*/
+!campaigns/example/
+
+# Editor
+*.swp
+.idea/
+.vscode/
+
+# OS
+.DS_Store
