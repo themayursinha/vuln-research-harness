@@ -9,11 +9,11 @@
 
 ## Phase 2: controlled execution
 
-- [ ] Campaign directory layout and snapshot manifest
-- [ ] Structured worker request/result schema
-- [ ] Coordinator round state machine
-- [ ] Read-only executor interface
-- [ ] Explicit executor capability checks
+- [x] Campaign directory layout and snapshot manifest
+- [x] Structured worker request/result schema
+- [x] Coordinator round state machine
+- [x] Read-only executor interface (manual inbox executor, v1)
+- [x] Explicit executor capability checks (fail-closed gate)
 
 ## Phase 3: validation
 

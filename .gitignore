@@ -1,5 +1,5 @@
-# Binaries
-vrh
+# Binaries (root path only — must not shadow cmd/vrh/)
+/vrh
 dist/
 
 # Go
