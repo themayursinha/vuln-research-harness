@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/themayursinha/vuln-research-harness/internal/capability"
+	"github.com/themayursinha/vuln-research-harness/internal/ledger"
 	"github.com/themayursinha/vuln-research-harness/internal/worker"
 )
 
@@ -180,5 +182,121 @@ func TestConsumePreventsReingestAfterReopen(t *testing.T) {
 	}
 	if _, err := inbox.CollectResults(DefaultGate(), outstanding); err == nil {
 		t.Fatal("collect after consume unexpectedly succeeded")
+	}
+}
+
+func TestOutstandingFromLedgerRejectsUnpublishedRequestFile(t *testing.T) {
+	inbox, err := NewInbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A hand-placed request file with no request_published event must never
+	// be treated as dispatched, even though it sits in requests/.
+	data := []byte(`{"id":"injected--r1","round":1,"family":"injected","goal":"g"}`)
+	if err := os.WriteFile(filepath.Join(inbox.dir, "requests", "injected--r1.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OutstandingFromLedger(inbox, nil); err == nil {
+		t.Fatal("unpublished request file accepted as dispatched")
+	}
+}
+
+func TestOutstandingFromLedgerRejectsTamperedFamily(t *testing.T) {
+	inbox, err := NewInbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+		t.Fatal(err)
+	}
+	events := []ledger.Event{{
+		ID:   "auth--r1",
+		Type: "request_published",
+		Data: map[string]string{"round": "1", "family": "auth"},
+	}}
+	// Tamper with the envelope's family after publication.
+	path := filepath.Join(inbox.dir, "requests", "auth--r1.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := []byte(strings.Replace(string(data), `"family": "auth"`, `"family": "other"`, 1))
+	if err := os.WriteFile(path, tampered, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OutstandingFromLedger(inbox, events); err == nil {
+		t.Fatal("envelope family diverging from ledger was accepted")
+	}
+}
+
+func TestConsumeRejectsDuplicateRequestIDs(t *testing.T) {
+	inbox, err := NewInbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+		t.Fatal(err)
+	}
+	writeResultEnvelope(t, inbox, "auth--r1.json", worker.Result{
+		RequestID: "auth--r1",
+		Status:    worker.ResultProgress,
+		Summary:   "first",
+	}, satisfiedClaims())
+	writeResultEnvelope(t, inbox, "duplicate.json", worker.Result{
+		RequestID:   "auth--r1",
+		Status:      worker.ResultBlocked,
+		Summary:     "second",
+		BlockReason: "contradicting verdict",
+	}, satisfiedClaims())
+	outstanding, err := OutstandingFromLedger(inbox, []ledger.Event{{
+		ID:   "auth--r1",
+		Type: "request_published",
+		Data: map[string]string{"round": "1", "family": "auth"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inbox.CollectResults(DefaultGate(), outstanding); err == nil {
+		t.Fatal("two envelopes answering the same request were accepted together")
+	}
+}
+
+func TestOutstandingFromLedgerExcludesIngestedRequests(t *testing.T) {
+	inbox, err := NewInbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+		t.Fatal(err)
+	}
+	events := []ledger.Event{
+		{ID: "auth--r1", Type: "request_published", Data: map[string]string{"round": "1", "family": "auth"}},
+		{ID: "auth--r1", Type: "result_ingested", Data: map[string]string{"status": "progress"}},
+	}
+	outstanding, err := OutstandingFromLedger(inbox, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outstanding) != 0 {
+		t.Fatalf("ingested request still outstanding: %v", outstanding)
+	}
+}
+
+func TestOutstandingFromLedgerAllowsRedroppedConsumedEnvelopeFile(t *testing.T) {
+	inbox, err := NewInbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inbox.Publish(worker.Request{ID: "auth--r1", Round: 1, Family: "auth", Goal: "g"}); err != nil {
+		t.Fatal(err)
+	}
+	events := []ledger.Event{
+		{ID: "auth--r1", Type: "request_published", Data: map[string]string{"round": "1", "family": "auth"}},
+		{ID: "auth--r1", Type: "result_ingested", Data: map[string]string{}},
+	}
+	// The envelope file lingers (worker re-dropped it after consume); the
+	// ledger already recorded ingestion, so this is not an unpublished file.
+	if _, err := OutstandingFromLedger(inbox, events); err != nil {
+		t.Fatalf("consumed-but-present envelope treated as unpublished: %v", err)
 	}
 }

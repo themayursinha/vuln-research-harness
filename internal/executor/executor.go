@@ -179,6 +179,11 @@ func (i *Inbox) CollectResults(gate *capability.Gate, outstanding map[string]str
 		if _, ok := outstanding[envelope.Result.RequestID]; !ok {
 			return nil, fmt.Errorf("result %q in %s does not answer an outstanding request", envelope.Result.RequestID, entry.Name())
 		}
+		for _, prior := range collected {
+			if prior.Result.RequestID == envelope.Result.RequestID {
+				return nil, fmt.Errorf("two result envelopes answer request %s (%s and %s); rejecting the batch", envelope.Result.RequestID, prior.Filename, entry.Name())
+			}
+		}
 		collected = append(collected, Collected{Filename: entry.Name(), Result: envelope.Result})
 	}
 	if len(collected) == 0 {

@@ -5,20 +5,54 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-// Save persists the registry to dir/registry.json.
+// ValidateFamilyName rejects family names that cannot be used as safe path
+// components. Request IDs are derived as "<family>--r<round>" and become
+// envelope filenames under inbox/requests/, so a family containing path
+// separators or traversal segments would write envelopes outside the requests
+// directory. Call it wherever untrusted family names enter the system.
+func ValidateFamilyName(family string) error {
+	if strings.TrimSpace(family) == "" || strings.ContainsAny(family, "/\\") ||
+		family == "." || family == ".." {
+		return fmt.Errorf("family %q must be a safe path component", family)
+	}
+	for _, segment := range strings.Split(family, "--") {
+		if segment == "" || segment == "." || segment == ".." {
+			return fmt.Errorf("family %q must not contain empty, '.', or '..' segments split on '--'", family)
+		}
+	}
+	if strings.TrimSpace(family) != family {
+		return fmt.Errorf("family %q must not have leading or trailing whitespace", family)
+	}
+	return nil
+}
+
+// Save persists the registry to dir/registry.json atomically: a temporary file
+// is written in full and then renamed over the target, so a crash can never
+// leave a truncated registry.json behind that would block ledger-based
+// reconciliation on the next command.
 func (r *Registry) Save(dir string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create registry dir: %w", err)
+	}
+	for _, approach := range r.All() {
+		if err := ValidateFamilyName(approach.Family); err != nil {
+			return fmt.Errorf("refusing to persist unsafe registry entry: %w", err)
+		}
 	}
 	data, err := json.MarshalIndent(r.All(), "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode registry: %w", err)
 	}
 	path := filepath.Join(dir, "registry.json")
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("write registry: %w", err)
+	tmp := filepath.Join(dir, ".registry.json.tmp")
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return fmt.Errorf("write registry temp file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("replace registry: %w", err)
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/themayursinha/vuln-research-harness/internal/contract"
@@ -25,6 +26,10 @@ type roundState struct {
 	MaxWorkers   int      `json:"max_workers"`
 	PendingRound int      `json:"pending_round,omitempty"`
 	PendingPlan  []string `json:"pending_plan,omitempty"`
+	// PublishedRounds records every round whose dispatch is recorded in the
+	// ledger. It lets a retry detect when a recovered "next" round has itself
+	// been partially or fully published, instead of re-dispatching it.
+	PublishedRounds map[int]bool `json:"published_rounds,omitempty"`
 }
 
 func campaignFiles(dir string) map[string]string {
@@ -56,7 +61,8 @@ func familiesCmd(args []string) error {
 		return errors.New("families requires <add|block|reopen|list> <campaign-dir> [family] [mechanism-or-reason]")
 	}
 	sub, dir := args[0], args[1]
-	reg, err := loadRegistry(dir)
+	events, _ := ledgerEventsFor(dir)
+	reg, err := loadRegistry(dir, events)
 	if err != nil {
 		return err
 	}
@@ -64,6 +70,9 @@ func familiesCmd(args []string) error {
 	case "add":
 		if len(args) != 4 {
 			return errors.New("families add requires <campaign-dir> <family> <mechanism>")
+		}
+		if err := registry.ValidateFamilyName(args[2]); err != nil {
+			return err
 		}
 		if err := reg.Add(args[2], args[3]); err != nil {
 			return err
@@ -122,7 +131,31 @@ func appendFamilyEvent(dir, id, eventType, family string, data map[string]string
 	return err
 }
 
-func loadRegistry(dir string) (*registry.Registry, error) {
+// ledgerEventsFor reads ledger events read-only; used where the ledger is not
+// otherwise opened. A missing or unreadable ledger yields no events.
+func ledgerEventsFor(dir string) ([]ledger.Event, error) {
+	files := campaignFiles(dir)
+	ldg, err := ledger.Open(files["ledger"])
+	if err != nil {
+		return nil, err
+	}
+	defer ldg.Close()
+	return ldg.Events()
+}
+
+func loadRegistry(dir string, events []ledger.Event) (*registry.Registry, error) {
+	reg, err := tryLoadRegistry(dir)
+	if err == nil {
+		return reg, nil
+	}
+	if len(events) == 0 {
+		return nil, fmt.Errorf("load registry: %w (no ledger events to reconcile from)", err)
+	}
+	fmt.Fprintln(os.Stderr, "vrh: registry.json unreadable; rebuilding from ledger:", err)
+	return registry.New(), nil
+}
+
+func tryLoadRegistry(dir string) (*registry.Registry, error) {
 	if _, err := os.Stat(filepath.Join(dir, "registry.json")); err != nil {
 		if os.IsNotExist(err) {
 			return registry.New(), nil
@@ -265,20 +298,6 @@ func roundPlanCmd(args []string) error {
 	if _, err := fmt.Sscanf(args[1], "%d", &maxWorkers); err != nil || maxWorkers < 1 {
 		return fmt.Errorf("max-workers must be a positive integer")
 	}
-	state, err := loadRoundState(files["state"], maxWorkers)
-	if err != nil {
-		return err
-	}
-	coord, err := coordinator.NewState(maxWorkers)
-	if err != nil {
-		return err
-	}
-	coord.Round = state.Round
-
-	reg, err := loadRegistry(dir)
-	if err != nil {
-		return err
-	}
 
 	ldg, err := ledger.Open(files["ledger"])
 	if err != nil {
@@ -289,9 +308,45 @@ func roundPlanCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	reg, err := loadRegistry(dir, events)
+	if err != nil {
+		return err
+	}
+
+	state, err := loadRoundState(files["state"], maxWorkers, events)
+	if err != nil {
+		return err
+	}
+	if state.PublishedRounds == nil {
+		state.PublishedRounds = map[int]bool{}
+	}
+	for _, event := range events {
+		if event.Type != "request_published" {
+			continue
+		}
+		if round, err := strconv.Atoi(event.Data["round"]); err == nil && round >= 1 {
+			state.PublishedRounds[round] = true
+		}
+	}
+	coord, err := coordinator.NewState(maxWorkers)
+	if err != nil {
+		return err
+	}
+	coord.Round = state.Round
+
 	reconcileRegistry(reg, events)
 	if len(reg.All()) == 0 {
 		return errors.New("no approach families registered; use: vrh families add")
+	}
+
+	// A recovered "next" round may itself already be published (state was
+	// rewritten after the advance but before the ledger caught up in a
+	// previous crash window). Never re-dispatch a recorded round: resume the
+	// next unfinished one so the worker bound and history stay intact.
+	for state.PublishedRounds[coord.Round] {
+		fmt.Printf("round %d already fully dispatched per ledger; advancing\n", coord.Round)
+		state.Round = coord.Round + 1
+		coord.Round = state.Round
 	}
 
 	// Determine this round's family set. If a crash interrupted an earlier
@@ -304,6 +359,16 @@ func roundPlanCmd(args []string) error {
 	} else {
 		plan = planFamilies(reg, coord.Round, maxWorkers)
 	}
+	if len(plan) == 0 && len(state.PendingPlan) > 0 && state.PendingRound == coord.Round {
+		// The recovered plan predates a manual block/exhaust of every member:
+		// nothing can be dispatched this round, so clear it rather than loop.
+		state.PendingRound = 0
+		state.PendingPlan = nil
+		if err := saveRoundState(files["state"], state); err != nil {
+			return err
+		}
+		return errors.New("recovered plan has no active families; re-run: vrh round plan")
+	}
 
 	published := publishedIDs(events, coord.Round)
 	var todo []string
@@ -315,6 +380,7 @@ func roundPlanCmd(args []string) error {
 
 	if len(todo) == 0 {
 		// Round fully planned (or nothing left to dispatch): advance.
+		state.PublishedRounds[coord.Round] = true
 		state.Round = coord.Round + 1
 		state.PendingRound = 0
 		state.PendingPlan = nil
@@ -365,16 +431,18 @@ func roundPlanCmd(args []string) error {
 		return err
 	}
 	reconcileRegistry(reg, events)
-	if err := reg.Save(dir); err != nil {
-		return err
-	}
-	// Advance past the planned round and clear the pending plan. If a crash
-	// lands between reg.Save and this write, the retry recovers via the
-	// pending plan and takes the "already fully planned" branch above.
+	// Mark the round as published and clear the pending plan BEFORE saving the
+	// registry: if a crash lands after this write but before reg.Save, the
+	// next command rebuilds registry.json from the intact ledger. The reverse
+	// order would leave a stale state that re-dispatches a recorded round.
+	state.PublishedRounds[coord.Round] = true
 	state.Round = coord.Round + 1
 	state.PendingRound = 0
 	state.PendingPlan = nil
 	if err := saveRoundState(files["state"], state); err != nil {
+		return err
+	}
+	if err := reg.Save(dir); err != nil {
 		return err
 	}
 	fmt.Printf("round %d planned: dispatched %s\n", coord.Round, strings.Join(todo, ", "))
@@ -442,7 +510,7 @@ func roundIngestCmd(args []string) error {
 		return err
 	}
 
-	reg, err := loadRegistry(dir)
+	reg, err := loadRegistry(dir, events)
 	if err != nil {
 		return err
 	}
@@ -455,7 +523,7 @@ func roundIngestCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	outstanding, err := inbox.OutstandingRequests()
+	outstanding, err := executor.OutstandingFromLedger(inbox, events)
 	if err != nil {
 		return err
 	}
@@ -475,6 +543,11 @@ func roundIngestCmd(args []string) error {
 			// replayed by reconcileRegistry; only the consume step is missing.
 			continue
 		}
+		for _, prior := range fresh {
+			if prior.RequestID == item.Result.RequestID {
+				return fmt.Errorf("two result envelopes answer request %s; rejecting the batch", item.Result.RequestID)
+			}
+		}
 		fresh = append(fresh, item.Result)
 	}
 	if len(fresh) > 0 {
@@ -486,10 +559,14 @@ func roundIngestCmd(args []string) error {
 			return err
 		}
 		for _, result := range fresh {
+			family := outstanding[result.RequestID]
+			if err := registry.ValidateFamilyName(family); err != nil {
+				return fmt.Errorf("request %s carries an unsafe family name; refusing to ingest", result.RequestID)
+			}
 			data := map[string]string{
 				"status":   string(result.Status),
 				"findings": fmt.Sprint(len(result.Findings)),
-				"family":   outstanding[result.RequestID],
+				"family":   family,
 			}
 			if result.BlockReason != "" {
 				data["block_reason"] = result.BlockReason
@@ -509,13 +586,21 @@ func roundIngestCmd(args []string) error {
 	return nil
 }
 
-func loadRoundState(path string, maxWorkers int) (roundState, error) {
+func loadRoundState(path string, maxWorkers int, events []ledger.Event) (roundState, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return roundState{Round: 1, MaxWorkers: maxWorkers}, nil
+		if !os.IsNotExist(err) {
+			return roundState{}, err
 		}
-		return roundState{}, err
+		state, recoverErr := recoverRoundState(events, maxWorkers)
+		if recoverErr != nil {
+			return roundState{}, recoverErr
+		}
+		if err := saveRoundState(path, state); err != nil {
+			return roundState{}, err
+		}
+		fmt.Printf("state.json missing: recovered at round %d from %d ledger publication(s)\n", state.Round, len(state.PublishedRounds))
+		return state, nil
 	}
 	var state roundState
 	if err := json.Unmarshal(data, &state); err != nil {
@@ -523,6 +608,40 @@ func loadRoundState(path string, maxWorkers int) (roundState, error) {
 	}
 	if state.Round < 1 {
 		state.Round = 1
+	}
+	return state, nil
+}
+
+// recoverRoundState rebuilds the round cursor after state.json was lost.
+// Publication events are the durable record of what was dispatched in which
+// historical round, so the next round is max(recorded rounds)+1 — never a
+// reset to round 1 that could double-dispatch an old round under a new one.
+// The most recent fully published round's family set is recovered as the
+// pending plan so a crash mid-round still resumes with the original set.
+func recoverRoundState(events []ledger.Event, maxWorkers int) (roundState, error) {
+	state := roundState{MaxWorkers: maxWorkers, PublishedRounds: make(map[int]bool)}
+	byRound := make(map[int][]string)
+	for _, event := range events {
+		if event.Type != "request_published" {
+			continue
+		}
+		round, err := strconv.Atoi(event.Data["round"])
+		if err != nil || round < 1 {
+			return roundState{}, fmt.Errorf("ledger: request_published event for %s has invalid round %q", event.ID, event.Data["round"])
+		}
+		state.PublishedRounds[round] = true
+		byRound[round] = append(byRound[round], event.Data["family"])
+	}
+	highest := 0
+	for round := range byRound {
+		if round > highest {
+			highest = round
+		}
+	}
+	state.Round = highest + 1
+	state.PendingPlan = byRound[highest]
+	if highest > 0 {
+		state.PendingRound = highest
 	}
 	return state, nil
 }

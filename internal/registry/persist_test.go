@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -46,5 +47,37 @@ func TestRecordDispatchRequiresActiveFamily(t *testing.T) {
 	approach, _ := registry.Get("cache")
 	if approach.Attempts != 3 {
 		t.Fatalf("expected 3 attempts, got %d", approach.Attempts)
+	}
+}
+
+func TestSaveIsAtomicAndNeverTruncates(t *testing.T) {
+	dir := t.TempDir()
+	registry := New()
+	if err := registry.Add("auth", "identity confusion"); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	// A crash mid-write must never leave a truncated registry.json behind:
+	// Save writes a temp file and renames it over the target.
+	if _, err := Load(dir); err != nil {
+		t.Fatalf("registry unreadable after save: %v", err)
+	}
+	if entries, err := filepath.Glob(filepath.Join(dir, ".registry.json.tmp")); err != nil || len(entries) != 0 {
+		t.Fatalf("temp file left behind: %v %v", entries, err)
+	}
+}
+
+func TestValidateFamilyNameRejectsTraversal(t *testing.T) {
+	for _, bad := range []string{"../auth", "a/b", `a\b`, "..", ".", "auth--", "--auth", " auth"} {
+		if err := ValidateFamilyName(bad); err == nil {
+			t.Errorf("family %q unexpectedly accepted", bad)
+		}
+	}
+	for _, good := range []string{"auth", "auth--oauth", "request-parsing", "parser.deep"} {
+		if err := ValidateFamilyName(good); err != nil {
+			t.Errorf("family %q unexpectedly rejected: %v", good, err)
+		}
 	}
 }

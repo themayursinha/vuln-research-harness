@@ -5,6 +5,7 @@ package worker
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -57,6 +58,35 @@ func (r Request) Validate() error {
 	}
 	if strings.TrimSpace(r.Goal) == "" {
 		return fmt.Errorf("request goal is required")
+	}
+	// The ID becomes an envelope filename under inbox/requests/ and the family
+	// feeds that ID, so both must be safe path components.
+	if err := validateSafeID(r.ID); err != nil {
+		return fmt.Errorf("request id: %w", err)
+	}
+	if err := validateSafeID(r.Family); err != nil {
+		return fmt.Errorf("request family: %w", err)
+	}
+	return nil
+}
+
+// validateSafeID ensures an identifier can be used as a single filename
+// component. Request IDs become envelope filenames under inbox/requests/, so
+// a family like "../auth" must never be allowed to escape that directory.
+func validateSafeID(id string) error {
+	if id == "." || id == ".." {
+		return fmt.Errorf("%q is not a safe identifier", id)
+	}
+	if strings.ContainsAny(id, "/\\") || strings.Contains(id, string(filepath.Separator)) {
+		return fmt.Errorf("%q must not contain path separators", id)
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return fmt.Errorf("%q contains character %q; use letters, digits, '-', '_' or '.'", id, r)
+		}
 	}
 	return nil
 }
