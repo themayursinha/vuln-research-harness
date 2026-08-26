@@ -65,7 +65,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  vrh families <add|block|reopen|list> <campaign-dir> ...")
 	fmt.Fprintln(os.Stderr, "  vrh round plan <campaign-dir> <max-workers>")
 	fmt.Fprintln(os.Stderr, "  vrh round ingest <campaign-dir>")
-	fmt.Fprintln(os.Stderr, "  vrh repro <cases.yaml> <snapshot-dir>")
+	fmt.Fprintln(os.Stderr, "  vrh repro <cases.yaml> <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh verify-sandbox")
 	fmt.Fprintln(os.Stderr, "  vrh adversarial <finding-id> <attempts.json> <summary>")
 	fmt.Fprintln(os.Stderr, "  vrh version")

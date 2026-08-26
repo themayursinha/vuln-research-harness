@@ -10,10 +10,11 @@ pins the target and success condition, an approach registry that prevents
 premature agent convergence, and an evidence ledger that records every state
 transition from hypothesis to reproduced impact.
 
-**Status: foundation + controlled execution.** The campaign contract, approach
-registry, evidence ledger, snapshot manifest, capability gate, and the manual
-inbox round loop are implemented and tested. An automated agent runner, the
-container/microVM adapter, and the adversarial validator are not built yet.
+**Status: foundation + controlled execution + validation lane.** The campaign
+contract, approach registry, evidence ledger, snapshot manifest, capability
+gate, manual inbox round loop, reproduction runner, sandbox probes, and
+adversarial validator are implemented and tested. An automated agent runner
+and the container/microVM adapter are not built yet.
 See [docs/roadmap.md](docs/roadmap.md) and [docs/campaigns.md](docs/campaigns.md).
 
 ## Why
@@ -89,7 +90,7 @@ vrh round ingest ./campaigns/mcp-filesystem-server
 ## Repository layout
 
 ```
-cmd/vrh/            CLI entry point (init, validate, snapshot, families, round)
+cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox)
 internal/contract/  campaign contract load/validate (YAML, digest-pinned)
 internal/registry/  approach family registry (convergence + blocked-path state)
 internal/ledger/    append-only evidence ledger (JSONL, hash-linked)
@@ -98,6 +99,9 @@ internal/capability/ executor capability gate (fail-closed admission)
 internal/worker/    structured request/result schema for research lanes
 internal/coordinator/ round state machine (plan + ingest)
 internal/executor/  manual inbox executor (v1; no target execution)
+internal/repro/     minimal reproduction runner (marker + pinned snapshot)
+internal/sandbox/   network-denial probes (fail-closed)
+internal/validate/  adversarial disproof lane
 docs/               method, safety model, contract reference, campaign layout, roadmap
 ```
 
@@ -108,12 +112,15 @@ MIT. See [LICENSE](LICENSE).
 ## Validation lane
 
 ```bash
-# Run reproduction cases against the pinned snapshot
-vrh repro cases.yaml /path/to/snapshot
-
-# Verify network isolation before executing anything
+# Prove network denial, then run reproduction cases against the pinned snapshot
 vrh verify-sandbox
+vrh repro cases.yaml ./campaigns/mcp-filesystem-server
 
 # Record an adversarial validation verdict for a finding
 vrh adversarial F1-json-bypass attempts.json "finding stands"
 ```
+
+`vrh repro` fails closed: it runs the same admission gate as `round plan`
+(contract, manifest digest, source-tree verify) and refuses to execute
+scripts unless live DNS and TCP probes prove isolation. `verify-sandbox`
+is a preflight; skipping it does not bypass the gate.

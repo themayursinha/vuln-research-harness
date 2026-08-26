@@ -17,14 +17,15 @@ internet targets and it does not grant permission to test a system.
 
 ## Non-goals of the current scaffold
 
-The current code does not execute agents, run target code, create containers,
-configure network namespaces, or enforce filesystem limits. Those are future
+The current code does not execute agents, create containers, configure
+network namespaces, or enforce filesystem limits. Those are future
 integrations and must not be implied by a valid contract. A valid contract is
 an admission check, not a sandbox.
 
-Until an executor exists, a campaign operator must supply the isolation and
-verify it independently. The planned executor will fail closed when it cannot
-prove the declared boundary.
+`vrh repro` executes reproduction scripts process-locally only after it
+proves network denial with live probes and verifies the pinned snapshot.
+That gate is fail-closed; it is not a substitute for a container or microVM
+adapter. `vrh verify-sandbox` is a preflight of the same probes.
 
 ## Responsible disclosure
 

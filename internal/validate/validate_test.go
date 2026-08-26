@@ -39,6 +39,14 @@ func TestFinalizeRejectsAttemptlessReport(t *testing.T) {
 	}
 }
 
+func TestFinalizeRejectsEmptyAttempt(t *testing.T) {
+	b := NewBuilder("F-empty")
+	b.Attempt("", "", "", false)
+	if _, err := b.Finalize("rubber stamp"); err == nil {
+		t.Fatal("empty disproof attempt accepted as upheld")
+	}
+}
+
 func TestSeverityNoteSurvivesExport(t *testing.T) {
 	b := NewBuilder("F4")
 	b.Attempt("check", "h", "r", false).SeverityNote("not RCE; exposure only")

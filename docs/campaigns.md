@@ -33,14 +33,19 @@ vrh round plan campaigns/<name> 3      # publishes request envelopes
 # workers execute in their own isolation; each returns a result envelope
 # with capability claims into inbox/results/
 vrh round ingest campaigns/<name>      # verifies gate + schema, updates registry
+
+vrh verify-sandbox                     # prove DNS+TCP denial in this environment
+vrh repro cases.yaml campaigns/<name>  # admission + isolation, then run cases
+vrh adversarial F1 attempts.json "finding stands"
 ```
 
-`round plan` and `round ingest` both run the **admission gate** first: the
+`round plan`, `round ingest`, and `vrh repro` all run the **admission gate** first: the
 contract must load and validate, the campaign `source_snapshot` must equal
 the manifest digest, and the source tree must still verify against the
 manifest — including a check that no file was added or removed since the
 snapshot. A directory with families but no valid authorized contract never
-dispatches work.
+dispatches work. `vrh repro` additionally refuses to execute scripts unless
+live DNS and TCP probes prove network isolation.
 
 The append-only ledger is the **single source of truth**; `registry.json`
 and `state.json` are materialized views reconstructed from it. Every command

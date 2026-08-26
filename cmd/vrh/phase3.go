@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/themayursinha/vuln-research-harness/internal/contract"
 	"github.com/themayursinha/vuln-research-harness/internal/repro"
 	"github.com/themayursinha/vuln-research-harness/internal/sandbox"
 	"github.com/themayursinha/vuln-research-harness/internal/validate"
@@ -25,10 +26,15 @@ type reproCaseFile struct {
 }
 
 func reproCmd(args []string) error {
+	return runRepro(args, requireNetworkIsolation)
+}
+
+func runRepro(args []string, isolate func() error) error {
 	if len(args) != 2 {
-		return errors.New("repro requires <cases.yaml> <snapshot-dir>")
+		return errors.New("repro requires <cases.yaml> <campaign-dir>")
 	}
-	data, err := os.ReadFile(args[0])
+	casesPath, campaignDir := args[0], args[1]
+	data, err := os.ReadFile(casesPath)
 	if err != nil {
 		return fmt.Errorf("read cases: %w", err)
 	}
@@ -40,6 +46,17 @@ func reproCmd(args []string) error {
 		return errors.New("no reproduction cases defined")
 	}
 
+	if err := requireAdmission(campaignDir); err != nil {
+		return err
+	}
+	if err := isolate(); err != nil {
+		return err
+	}
+	campaign, err := contract.Load(campaignFiles(campaignDir)["contract"])
+	if err != nil {
+		return fmt.Errorf("load campaign: %w", err)
+	}
+
 	var outcomes []repro.Outcome
 	for _, c := range cases {
 		outcome, err := repro.Run(repro.Case{
@@ -48,7 +65,7 @@ func reproCmd(args []string) error {
 			ScriptPath:  c.ScriptPath,
 			Interpreter: resolveInterpreter(c),
 			Marker:      c.Marker,
-			SnapshotDir: args[1],
+			SnapshotDir: campaign.Target.SourcePath,
 		})
 		if err != nil {
 			return err
@@ -61,11 +78,22 @@ func reproCmd(args []string) error {
 		outcomes = append(outcomes, outcome)
 	}
 
-	exportDir := filepath.Dir(args[0])
+	exportDir := filepath.Dir(casesPath)
 	if err := repro.Export(outcomes, exportDir); err != nil {
 		return err
 	}
 	fmt.Println("outcomes exported:", filepath.Join(exportDir, "repro_outcomes.json"))
+	return nil
+}
+
+func requireNetworkIsolation() error {
+	v, err := sandbox.VerifyNetwork(sandbox.DefaultNetworkProbes())
+	if err != nil {
+		return fmt.Errorf("sandbox: %w", err)
+	}
+	if !v.Passed {
+		return fmt.Errorf("refusing to run reproductions: network isolation not verified: %s", strings.Join(v.Problems, "; "))
+	}
 	return nil
 }
 
@@ -80,7 +108,7 @@ func verifySandboxCmd(args []string) error {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	fmt.Println(string(data))
 	if !v.Passed {
-		return errors.New("network boundary NOT verified: live access detected")
+		return fmt.Errorf("network boundary NOT verified: %s", strings.Join(v.Problems, "; "))
 	}
 	fmt.Println("network boundary verified: DNS and TCP both blocked")
 	return nil
@@ -88,7 +116,7 @@ func verifySandboxCmd(args []string) error {
 
 func validateCmd(args []string) error {
 	if len(args) < 3 {
-		return errors.New("validate requires <finding-id> <attempts.json> <summary>")
+		return errors.New("adversarial requires <finding-id> <attempts.json> <summary>")
 	}
 	findingID, attemptsPath, summary := args[0], args[1], strings.Join(args[2:], " ")
 	data, err := os.ReadFile(attemptsPath)

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -45,6 +46,9 @@ func Run(c Case) (Outcome, error) {
 	outcome := Outcome{CaseID: c.ID}
 	if c.ID == "" || c.ScriptPath == "" || c.Interpreter == "" {
 		return outcome, fmt.Errorf("case needs id, script_path and interpreter")
+	}
+	if strings.TrimSpace(c.Marker) == "" {
+		return outcome, fmt.Errorf("case %s has an empty marker; refusing to fabricate a reproduction", c.ID)
 	}
 	if _, err := os.Stat(c.ScriptPath); err != nil {
 		return outcome, fmt.Errorf("script not found: %w", err)

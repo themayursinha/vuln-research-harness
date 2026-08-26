@@ -65,6 +65,11 @@ func (b *Builder) Finalize(summary string) (Report, error) {
 	if len(b.report.Attempts) == 0 {
 		return Report{}, fmt.Errorf("finding %s has no disproof attempts; cannot validate", b.report.FindingID)
 	}
+	for i, attempt := range b.report.Attempts {
+		if strings.TrimSpace(attempt.Name) == "" || strings.TrimSpace(attempt.Hypothesis) == "" || strings.TrimSpace(attempt.Result) == "" {
+			return Report{}, fmt.Errorf("finding %s attempt %d is incomplete: name, hypothesis, and result are required", b.report.FindingID, i+1)
+		}
+	}
 	for _, attempt := range b.report.Attempts {
 		if attempt.BrokeIt {
 			b.report.Verdict = Refuted

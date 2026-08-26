@@ -60,6 +60,16 @@ func TestRunDetectsPatchedCase(t *testing.T) {
 	}
 }
 
+func TestRunRejectsEmptyMarker(t *testing.T) {
+	_, err := Run(Case{
+		ID: "f-empty", ScriptPath: "/nonexistent", Interpreter: "python3",
+		Marker: "  ", SnapshotDir: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("empty marker accepted")
+	}
+}
+
 func TestExportWritesJSONAtomically(t *testing.T) {
 	dir := t.TempDir()
 	outcomes := []Outcome{{CaseID: "c1", Vulnerable: true}}

@@ -4,6 +4,7 @@
 package sandbox
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -27,9 +28,12 @@ func DefaultNetworkProbes() []NetworkProbe {
 			Command: "python3",
 			Args: []string{"-c", `
 import socket
+socket.setdefaulttimeout(3)
 try:
     socket.getaddrinfo("example.com", 443)
     print("NETWORK_OK")
+except socket.timeout:
+    print("TIMEOUT")
 except OSError:
     print("BLOCKED")
 `},
@@ -44,6 +48,8 @@ try:
     s = socket.create_connection(("1.1.1.1", 80), timeout=3)
     s.close()
     print("NETWORK_OK")
+except socket.timeout:
+    print("TIMEOUT")
 except OSError:
     print("BLOCKED")
 `},
@@ -61,27 +67,55 @@ type Verification struct {
 }
 
 // VerifyNetwork runs the probes and certifies the boundary only when every
-// probe reports BLOCKED. A probe that cannot run is treated as blocked
-// (conservative): verification proves isolation, never assumes it.
+// probe executes successfully and reports BLOCKED. A probe that cannot run,
+// times out, or returns an inconclusive result leaves isolation unproven and
+// fails certification.
 func VerifyNetwork(probes []NetworkProbe) (Verification, error) {
 	v := Verification{Passed: true}
+	if len(probes) == 0 {
+		return Verification{Passed: false, Problems: []string{"no probes provided; isolation unproven"}}, nil
+	}
 	for _, probe := range probes {
-		cmd := exec.Command(probe.Command, probe.Args...)
-		outBytes, err := cmd.Output()
-		output := string(outBytes)
-		blocked := err != nil || strings.Contains(output, "BLOCKED")
 		switch probe.Name {
-		case "dns_resolution_blocked":
-			v.DNSBlocked = blocked
-		case "tcp_connect_blocked":
-			v.TCPBlocked = blocked
+		case "dns_resolution_blocked", "tcp_connect_blocked":
 		default:
 			return v, fmt.Errorf("unknown probe %q", probe.Name)
 		}
-		if !blocked {
+		if probe.Timeout <= 0 {
+			return v, fmt.Errorf("probe %q has no timeout", probe.Name)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), probe.Timeout)
+		cmd := exec.CommandContext(ctx, probe.Command, probe.Args...)
+		outBytes, err := cmd.CombinedOutput()
+		blocked, problem := interpretProbe(probe.Name, string(outBytes), err, ctx.Err())
+		cancel()
+		if probe.Name == "dns_resolution_blocked" {
+			v.DNSBlocked = blocked
+		} else {
+			v.TCPBlocked = blocked
+		}
+		if problem != "" {
 			v.Passed = false
-			v.Problems = append(v.Problems, fmt.Sprintf("probe %s found live network access", probe.Name))
+			v.Problems = append(v.Problems, problem)
 		}
 	}
 	return v, nil
+}
+
+func interpretProbe(name, output string, runErr, ctxErr error) (blocked bool, problem string) {
+	switch {
+	case ctxErr == context.DeadlineExceeded:
+		return false, fmt.Sprintf("probe %s timed out; isolation unproven", name)
+	case runErr != nil:
+		return false, fmt.Sprintf("probe %s failed to execute; isolation unproven: %v", name, runErr)
+	case strings.Contains(output, "NETWORK_OK"):
+		return false, fmt.Sprintf("probe %s found live network access", name)
+	case strings.Contains(output, "TIMEOUT"):
+		return false, fmt.Sprintf("probe %s timed out; isolation unproven", name)
+	case strings.Contains(output, "BLOCKED"):
+		return true, ""
+	default:
+		return false, fmt.Sprintf("probe %s produced no conclusive result; isolation unproven", name)
+	}
 }
