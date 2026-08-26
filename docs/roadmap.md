@@ -17,11 +17,11 @@
 
 ## Phase 3: validation
 
-- [ ] Minimal reproduction runner
-- [ ] Disposable container or microVM adapter
-- [ ] Network boundary verification
-- [ ] Independent adversarial validator lane
-- [ ] Evidence export and disclosure package
+- [x] Minimal reproduction runner (vrh repro)
+- [ ] Disposable container or microVM adapter (process-local v1; container adapter next)
+- [x] Network boundary verification (vrh verify-sandbox; fail-closed probes)
+- [x] Independent adversarial validator lane (vrh adversarial)
+- [x] Evidence export (repro outcomes + validation reports as JSON)
 
 ## Phase 4: pilot
 

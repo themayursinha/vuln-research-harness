@@ -10,8 +10,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -236,4 +238,99 @@ func (m Manifest) Verify(sourceDir string) error {
 		return fmt.Errorf("source changed: rebuilt archive digest %s does not match pinned %s", rebuilt, m.ArchiveSHA)
 	}
 	return nil
+}
+
+// Extract unpacks the pinned archive into dest after checking its digest,
+// refusing non-regular entries and path traversal. dest is then verified
+// against the manifest so a reproduction never sees a different tree than
+// the one the campaign contract pinned.
+func (m Manifest) Extract(archivePath, dest string) error {
+	data, err := os.ReadFile(archivePath)
+	if err != nil {
+		return fmt.Errorf("read archive: %w", err)
+	}
+	if got := digest(data); got != m.ArchiveSHA {
+		return fmt.Errorf("archive digest %s does not match pinned %s", got, m.ArchiveSHA)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("open archive: %w", err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read archive entry: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			return fmt.Errorf("refusing non-regular archive entry: %s", hdr.Name)
+		}
+		rel, err := safeArchivePath(hdr.Name)
+		if err != nil {
+			return err
+		}
+		full := filepath.Join(dest, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+			return fmt.Errorf("extract %s: %w", rel, err)
+		}
+		file, err := os.OpenFile(full, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0444)
+		if err != nil {
+			return fmt.Errorf("extract %s: %w", rel, err)
+		}
+		if _, err := io.Copy(file, tr); err != nil {
+			file.Close()
+			return fmt.Errorf("extract %s: %w", rel, err)
+		}
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("extract %s: %w", rel, err)
+		}
+	}
+	if err := m.Verify(dest); err != nil {
+		return fmt.Errorf("extracted snapshot does not match manifest: %w", err)
+	}
+	if err := makeReadOnly(dest); err != nil {
+		return fmt.Errorf("lock extracted snapshot: %w", err)
+	}
+	return nil
+}
+
+// RemoveReadOnly restores write bits then deletes a tree produced by Extract.
+func RemoveReadOnly(dir string) error {
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		mode := os.FileMode(0700)
+		if !d.IsDir() {
+			mode = 0600
+		}
+		_ = os.Chmod(p, mode)
+		return nil
+	})
+	return os.RemoveAll(dir)
+}
+
+func makeReadOnly(root string) error {
+	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.Chmod(p, 0555)
+		}
+		return os.Chmod(p, 0444)
+	})
+}
+
+func safeArchivePath(name string) (string, error) {
+	cleaned := path.Clean("/" + strings.TrimPrefix(filepath.ToSlash(name), "/"))
+	rel := strings.TrimPrefix(cleaned, "/")
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") || strings.Contains(rel, ":") {
+		return "", fmt.Errorf("refusing unsafe archive path: %s", name)
+	}
+	return rel, nil
 }

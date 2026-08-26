@@ -39,6 +39,12 @@ func main() {
 			usage()
 			os.Exit(2)
 		}
+	case "repro":
+		err = reproCmd(os.Args[2:])
+	case "adversarial":
+		err = validateCmd(os.Args[2:])
+	case "verify-sandbox":
+		err = verifySandboxCmd(os.Args[2:])
 	case "version":
 		fmt.Println("vrh 0.2.0")
 	default:
@@ -59,6 +65,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  vrh families <add|block|reopen|list> <campaign-dir> ...")
 	fmt.Fprintln(os.Stderr, "  vrh round plan <campaign-dir> <max-workers>")
 	fmt.Fprintln(os.Stderr, "  vrh round ingest <campaign-dir>")
+	fmt.Fprintln(os.Stderr, "  vrh repro <cases.yaml> <campaign-dir>")
+	fmt.Fprintln(os.Stderr, "  vrh verify-sandbox")
+	fmt.Fprintln(os.Stderr, "  vrh adversarial <finding-id> <attempts.json> <summary>")
 	fmt.Fprintln(os.Stderr, "  vrh version")
 }
 

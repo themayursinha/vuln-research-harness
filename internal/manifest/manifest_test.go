@@ -136,3 +136,23 @@ func TestVerifyRejectsNonRegularFiles(t *testing.T) {
 		t.Fatal("verify accepted a symlink replacement")
 	}
 }
+
+func TestExtractRoundTrip(t *testing.T) {
+	src := writeFixture(t, "main.go", "package main")
+	out := t.TempDir()
+	m, err := Snapshot(src, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "snap")
+	if err := os.MkdirAll(dest, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Extract(filepath.Join(out, "source.tar.gz"), dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Verify(dest); err != nil {
+		t.Fatalf("extracted tree failed verify: %v", err)
+	}
+	t.Cleanup(func() { _ = RemoveReadOnly(dest) })
+}
