@@ -96,11 +96,6 @@ func (s Spec) validate() error {
 	if strings.HasPrefix(s.Command[0], "-") {
 		return fmt.Errorf("container command must not start with a flag")
 	}
-	if strings.ContainsRune(s.Command[0], os.PathSeparator) {
-		if _, err := os.Stat(s.Command[0]); err == nil {
-			return fmt.Errorf("host interpreter %s cannot run inside the container; use an interpreter from the pinned image", s.Command[0])
-		}
-	}
 	if s.Snapshot != "" {
 		if err := absCleanPath(s.Snapshot, "snapshot"); err != nil {
 			return err
@@ -129,34 +124,32 @@ func absCleanPath(p, what string) error {
 
 // RunArgs is the argv after the runtime binary. Tests lock this list so a
 // future caller cannot add -p, --privileged, or a pull.
-func RunArgs(spec Spec, cidFile string) ([]string, error) {
+func RunArgs(kind string, spec Spec, cidFile string) ([]string, error) {
 	if err := spec.validate(); err != nil {
 		return nil, err
 	}
 	if cidFile == "" || !filepath.IsAbs(cidFile) {
 		return nil, fmt.Errorf("cidfile must be an absolute path")
 	}
-	args := []string{
-		"run", "--rm",
-		"--network=none",
-		"--pull=never",
-		"--read-only",
-		"--cap-drop=ALL",
-		"--security-opt=no-new-privileges",
-		"--memory=512m",
-		"--cidfile=" + cidFile,
-		fmt.Sprintf("--user=%d:%d", os.Getuid(), os.Getgid()),
+	iso, err := isolationFlags(kind)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"run", "--rm"}
+	args = append(args, iso...)
+	args = append(args,
+		"--cidfile="+cidFile,
 		"--tmpfs=/tmp:rw,noexec,nosuid,nodev",
-		"--tmpfs=" + ScratchMount + ":rw,exec,nosuid,nodev",
-		"-e", "VRH_SNAPSHOT=" + SnapshotMount,
-		"-e", "VRH_SCRATCH=" + ScratchMount,
-		"-e", "HOME=" + ScratchMount,
-		"-e", "TMPDIR=" + ScratchMount,
+		"--tmpfs="+ScratchMount+":rw,exec,nosuid,nodev",
+		"-e", "VRH_SNAPSHOT="+SnapshotMount,
+		"-e", "VRH_SCRATCH="+ScratchMount,
+		"-e", "HOME="+ScratchMount,
+		"-e", "TMPDIR="+ScratchMount,
 		"-e", "PYTHONDONTWRITEBYTECODE=1",
 		"-e", "LANG=C",
 		"-e", "LC_ALL=C",
-		"--entrypoint=" + spec.Command[0],
-	}
+		"--entrypoint="+spec.Command[0],
+	)
 	if spec.Snapshot != "" {
 		args = append(args, "--mount=type=bind,src="+spec.Snapshot+",dst="+SnapshotMount+",ro=true")
 	}
@@ -171,6 +164,36 @@ func RunArgs(spec Spec, cidFile string) ([]string, error) {
 	return args, nil
 }
 
+func isolationFlags(kind string) ([]string, error) {
+	switch kind {
+	case "docker", "podman":
+	default:
+		return nil, fmt.Errorf("unknown container runtime %q", kind)
+	}
+	flags := []string{
+		"--network=none",
+		"--pull=never",
+		"--read-only",
+		"--cap-drop=ALL",
+		"--security-opt=no-new-privileges",
+		"--memory=512m",
+	}
+	return append(flags, identityFlags(kind)...), nil
+}
+
+func identityFlags(kind string) []string {
+	switch kind {
+	case "podman":
+		// Rootless Podman maps the caller to container uid 0 by default.
+		// keep-id keeps the caller's UID so 0700 bind mounts stay readable.
+		return []string{"--userns=keep-id"}
+	case "docker":
+		return []string{fmt.Sprintf("--user=%d:%d", os.Getuid(), os.Getgid())}
+	default:
+		return nil
+	}
+}
+
 func forbidUnsafeArgs(args []string) error {
 	joined := strings.Join(args, "\x00")
 	for _, bad := range []string{
@@ -178,6 +201,7 @@ func forbidUnsafeArgs(args []string) error {
 		"--network=host",
 		"--net=host",
 		"--pid=host",
+		"--userns=host",
 		"--pull=always",
 		"--pull=missing",
 		"--publish-all",
@@ -238,7 +262,7 @@ func (rt Runtime) RequireImage(image string) error {
 // Command builds a runtime invocation for spec. Cancel removes the
 // container by cidfile so a deadline cannot leave a running research box.
 func (rt Runtime) Command(ctx context.Context, spec Spec, cidFile string) (*exec.Cmd, error) {
-	args, err := RunArgs(spec, cidFile)
+	args, err := RunArgs(rt.Kind, spec, cidFile)
 	if err != nil {
 		return nil, err
 	}

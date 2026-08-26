@@ -28,7 +28,7 @@ must pin `environment.container_image` by digest, and that image must
 already exist locally. Loopback remains available for local fixtures.
 Process-local user namespaces and Landlock are the unit-test sandbox; they
 are not the CLI execution boundary. `vrh verify-sandbox <campaign-dir>`
-proves the container boundary before a run.
+proves the runtime applied those flags before a run.
 
 ## Responsible disclosure
 

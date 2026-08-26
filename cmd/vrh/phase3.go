@@ -165,7 +165,7 @@ func verifySandboxCmd(args []string) error {
 	}
 	fmt.Printf("container runtime: %s\n", rt.Kind)
 	fmt.Printf("image: %s\n", campaign.Environment.ContainerImage)
-	fmt.Println("network boundary verified: DNS and TCP blocked inside --network=none; loopback usable")
+	fmt.Println("container isolation verified: network=none, read-only rootfs, capabilities dropped, no published ports")
 	return nil
 }
 

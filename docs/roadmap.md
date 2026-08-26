@@ -19,7 +19,7 @@
 
 - [x] Minimal reproduction runner (vrh repro)
 - [x] Disposable container adapter (digest-pinned local image; process-local namespaces remain the unit-test fallback)
-- [x] Network boundary verification (vrh verify-sandbox; fail-closed probes inside the container)
+- [x] Network boundary verification (vrh verify-sandbox; inspects created container HostConfig)
 - [x] Independent adversarial validator lane (vrh adversarial)
 - [x] Evidence export (repro outcomes + validation reports as JSON)
 

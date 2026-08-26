@@ -41,7 +41,7 @@ func TestRunArgsLocksIsolation(t *testing.T) {
 	}
 	cid := filepath.Join(dir, "cid")
 	image := "localhost/vrh@sha256:" + strings.Repeat("11", 32)
-	args, err := RunArgs(Spec{
+	args, err := RunArgs("docker", Spec{
 		Image:    image,
 		Snapshot: snap,
 		Script:   script,
@@ -67,13 +67,16 @@ func TestRunArgsLocksIsolation(t *testing.T) {
 	if strings.Count(joined, "ro=true") < 2 {
 		t.Errorf("script and snapshot must both be read-only: %s", joined)
 	}
-	if args[len(args)-2] != image || args[len(args)-1] != CaseMount {
-		t.Errorf("entrypoint argv: %v", args)
+	if strings.Contains(joined, "--userns=keep-id") {
+		t.Errorf("docker must not use podman keep-id: %s", joined)
+	}
+	if !strings.Contains(joined, "--user=") {
+		t.Errorf("docker missing --user: %s", joined)
 	}
 }
 
 func TestRunArgsRejectsTag(t *testing.T) {
-	_, err := RunArgs(Spec{
+	_, err := RunArgs("docker", Spec{
 		Image:   "python:3.12",
 		Command: []string{"python3"},
 	}, filepath.Join(t.TempDir(), "cid"))
@@ -82,22 +85,65 @@ func TestRunArgsRejectsTag(t *testing.T) {
 	}
 }
 
-func TestRunArgsRejectsHostInterpreter(t *testing.T) {
-	hostPy := filepath.Join(t.TempDir(), "python")
-	if err := os.WriteFile(hostPy, []byte("#!/bin/true\n"), 0700); err != nil {
+func TestRunArgsAcceptsInImageAbsolutePath(t *testing.T) {
+	_, err := RunArgs("docker", Spec{
+		Image:   "sha256:" + strings.Repeat("11", 32),
+		Command: []string{"/usr/bin/python3", CaseMount},
+	}, filepath.Join(t.TempDir(), "cid"))
+	if err != nil {
+		t.Fatalf("in-image absolute interpreter rejected: %v", err)
+	}
+}
+
+func TestRunArgsPodmanKeepID(t *testing.T) {
+	args, err := RunArgs("podman", Spec{
+		Image:   "sha256:" + strings.Repeat("11", 32),
+		Command: []string{"python3", CaseMount},
+	}, filepath.Join(t.TempDir(), "cid"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err := RunArgs(Spec{
-		Image:   "sha256:" + strings.Repeat("11", 32),
-		Command: []string{hostPy, CaseMount},
-	}, filepath.Join(t.TempDir(), "cid"))
-	if err == nil {
-		t.Fatal("host interpreter accepted")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--userns=keep-id") {
+		t.Fatalf("podman missing keep-id: %s", joined)
+	}
+	if strings.Contains(joined, "--user=") {
+		t.Fatalf("podman must not pass --user with keep-id: %s", joined)
+	}
+}
+
+func TestCreateArgsHasNoInterpreter(t *testing.T) {
+	image := "sha256:" + strings.Repeat("11", 32)
+	args, err := CreateArgs("docker", image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "python") {
+		t.Fatalf("isolation create must not require python: %s", joined)
+	}
+	for _, need := range []string{"create", "--network=none", "--pull=never", "--read-only"} {
+		if !strings.Contains(joined, need) {
+			t.Errorf("missing %q in %s", need, joined)
+		}
+	}
+}
+
+func TestCertifyHostConfig(t *testing.T) {
+	good := []byte(`{"HostConfig":{"NetworkMode":"none","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"]}}`)
+	if err := certifyHostConfig(good); err != nil {
+		t.Fatal(err)
+	}
+	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"bridge","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"]}}`)); err == nil {
+		t.Fatal("bridge network accepted")
+	}
+	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","Privileged":true,"ReadonlyRootfs":true,"CapDrop":["ALL"]}}`)); err == nil {
+		t.Fatal("privileged accepted")
 	}
 }
 
 func TestRunArgsRejectsRelativeBind(t *testing.T) {
-	_, err := RunArgs(Spec{
+	_, err := RunArgs("docker", Spec{
 		Image:    "sha256:" + strings.Repeat("11", 32),
 		Snapshot: "snap",
 		Command:  []string{"python3"},
@@ -121,7 +167,7 @@ func TestRequireImageMissing(t *testing.T) {
 func TestLiveVerifyIsolation(t *testing.T) {
 	image := os.Getenv("VRH_TEST_IMAGE")
 	if image == "" {
-		t.Skip("set VRH_TEST_IMAGE to a local digest-pinned python image")
+		t.Skip("set VRH_TEST_IMAGE to a local digest-pinned image")
 	}
 	rt, err := Detect()
 	if err != nil {

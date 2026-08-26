@@ -34,7 +34,7 @@ vrh round plan campaigns/<name> 3      # publishes request envelopes
 # with capability claims into inbox/results/
 vrh round ingest campaigns/<name>      # verifies gate + schema, updates registry
 
-vrh verify-sandbox campaigns/<name>    # prove DNS+TCP denial inside the pinned image
+vrh verify-sandbox campaigns/<name>    # prove the pinned image runs with network=none
 vrh repro cases.yaml campaigns/<name>  # admission + container isolation, then run cases
 vrh adversarial F1 attempts.json "finding stands"
 ```
@@ -47,9 +47,9 @@ snapshot. A directory with families but no valid authorized contract never
 dispatches work. `vrh repro` additionally extracts a fresh copy of the pinned
 archive for each case and runs the script in a digest-pinned local
 container (`--network=none`, read-only snapshot mount, `--pull=never`).
-It refuses to execute unless the image is already local and in-container
-DNS/TCP probes prove isolation. Process-local namespaces are used only
-in unit tests.
+It refuses to execute unless the image is already local and a created
+container inspects as `--network=none`, read-only, cap-drop ALL, and
+no published ports. Process-local namespaces are used only in unit tests.
 
 The append-only ledger is the **single source of truth**; `registry.json`
 and `state.json` are materialized views reconstructed from it. Every command
