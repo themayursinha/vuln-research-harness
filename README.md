@@ -65,7 +65,7 @@ unsupported.
 go install github.com/themayursinha/vuln-research-harness/cmd/vrh@latest
 ```
 
-PRs run `go vet` / `go test` / `go build`, [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck), Semgrep (`p/golang`, `p/security-audit`, `p/owasp-top-ten`), and CodeQL. Semgrep and CodeQL results also go to the repo Security tab.
+PRs run `go vet` / `go test` / `go build`, [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck), and CodeQL. CodeQL results go to the repo Security tab.
 
 ## Usage
 

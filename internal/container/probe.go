@@ -23,7 +23,10 @@ func CreateArgs(kind string, spec Spec, name string, rootless bool) ([]string, e
 	}
 	args := append([]string{"create", "--name=" + name}, iso...)
 	args = append(args, bindMounts(spec)...)
-	args = append(args, spec.Image)
+	// Create does not start the container. An explicit entrypoint is still
+	// required: images with neither CMD nor ENTRYPOINT are rejected by
+	// docker/podman create. The path is not executed and need not exist.
+	args = append(args, "--entrypoint=/vrh/isolation-probe-never-exec", spec.Image)
 	if err := forbidUnsafeArgs(args); err != nil {
 		return nil, err
 	}

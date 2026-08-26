@@ -249,10 +249,9 @@ func identityFlags(kind string, rootless bool) []string {
 		return []string{"--userns=keep-id"}
 	case "docker":
 		if rootless {
-			// Rootless Docker also maps the caller to container uid 0.
-			// --user=hostUid selects a subordinate uid that cannot read
-			// 0700 host bind mounts.
-			return nil
+			// Rootless Docker maps container uid 0 to the caller. --user=0:0
+			// overrides a Dockerfile USER so 0700 bind mounts stay readable.
+			return []string{"--user=0:0"}
 		}
 		return []string{fmt.Sprintf("--user=%d:%d", os.Getuid(), os.Getgid())}
 	default:

@@ -123,7 +123,7 @@ func TestCreateArgsHasNoInterpreter(t *testing.T) {
 	if strings.Contains(joined, "python") {
 		t.Fatalf("isolation create must not require python: %s", joined)
 	}
-	for _, need := range []string{"create", "--network=none", "--pull=never", "--read-only"} {
+	for _, need := range []string{"create", "--network=none", "--pull=never", "--read-only", "--entrypoint=/vrh/isolation-probe-never-exec"} {
 		if !strings.Contains(joined, need) {
 			t.Errorf("missing %q in %s", need, joined)
 		}
@@ -292,7 +292,7 @@ func TestRunArgsRejectsMountMetacharacters(t *testing.T) {
 	}
 }
 
-func TestRunArgsDockerRootlessOmitsUser(t *testing.T) {
+func TestRunArgsDockerRootlessUsesContainerRoot(t *testing.T) {
 	args, err := RunArgs("docker", Spec{
 		Image:   "sha256:" + strings.Repeat("11", 32),
 		Command: []string{"python3", CaseMount},
@@ -301,8 +301,8 @@ func TestRunArgsDockerRootlessOmitsUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(args, " ")
-	if strings.Contains(joined, "--user=") {
-		t.Fatalf("rootless docker must not pass --user: %s", joined)
+	if !strings.Contains(joined, "--user=0:0") {
+		t.Fatalf("rootless docker missing --user=0:0: %s", joined)
 	}
 	if strings.Contains(joined, "--userns=keep-id") {
 		t.Fatalf("docker must not use podman keep-id: %s", joined)
