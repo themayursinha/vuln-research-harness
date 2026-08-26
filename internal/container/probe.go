@@ -10,14 +10,14 @@ import (
 
 // CreateArgs builds a create-only invocation used to inspect HostConfig
 // without executing anything inside the image.
-func CreateArgs(kind string, spec Spec, name string) ([]string, error) {
+func CreateArgs(kind string, spec Spec, name string, rootless bool) ([]string, error) {
 	if err := spec.validateBinds(); err != nil {
 		return nil, err
 	}
 	if !validContainerName(name) {
 		return nil, fmt.Errorf("container name must be a vrh-* token")
 	}
-	iso, err := isolationFlags(kind)
+	iso, err := isolationFlags(kind, rootless)
 	if err != nil {
 		return nil, err
 	}
@@ -102,8 +102,8 @@ func certifyHostConfig(raw []byte, spec Spec) error {
 	if hc.Memory <= 0 {
 		return fmt.Errorf("container memory limit is unproven")
 	}
-	if hc.MemorySwap < 0 {
-		return fmt.Errorf("container swap is unlimited")
+	if hc.MemorySwap <= 0 {
+		return fmt.Errorf("container swap limit is unproven")
 	}
 	if hc.MemorySwap > hc.Memory {
 		return fmt.Errorf("container swap %d exceeds memory %d", hc.MemorySwap, hc.Memory)
@@ -195,7 +195,7 @@ func (rt Runtime) VerifyIsolation(image string) error {
 	}
 	spec := Spec{Image: image, Snapshot: snap, Script: script}
 	name := UniqueName()
-	args, err := CreateArgs(rt.Kind, spec, name)
+	args, err := CreateArgs(rt.Kind, spec, name, rt.Rootless)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func (rt Runtime) VerifyIsolation(image string) error {
 	}
 	cid := strings.TrimSpace(string(createOut))
 	defer func() {
-		rt.removeContainer(name, "")
+		_ = rt.removeContainer(name, "")
 		if cid != "" && cid != name {
 			_, _ = rt.preflight("rm", "-f", cid)
 		}

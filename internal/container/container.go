@@ -7,6 +7,7 @@ package container
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -33,8 +34,9 @@ const (
 
 // Runtime is a local podman or docker binary that can run a locked spec.
 type Runtime struct {
-	Bin  string
-	Kind string
+	Bin      string
+	Kind     string
+	Rootless bool
 }
 
 // Spec is one locked container invocation. Callers cannot request network,
@@ -69,7 +71,12 @@ func Detect() (Runtime, error) {
 		if err != nil {
 			continue
 		}
-		return Runtime{Bin: bin, Kind: kind}, nil
+		rootless, err := inspectRootless(kind, bin, env)
+		if err != nil {
+			remoteErr = err
+			continue
+		}
+		return Runtime{Bin: bin, Kind: kind, Rootless: rootless}, nil
 	}
 	if remoteErr != nil {
 		return Runtime{}, remoteErr
@@ -165,7 +172,7 @@ func validContainerName(name string) bool {
 
 // RunArgs is the argv after the runtime binary. Tests lock this list so a
 // future caller cannot add -p, --privileged, or a pull.
-func RunArgs(kind string, spec Spec, cidFile, name string) ([]string, error) {
+func RunArgs(kind string, spec Spec, cidFile, name string, rootless bool) ([]string, error) {
 	if err := spec.validate(); err != nil {
 		return nil, err
 	}
@@ -175,7 +182,7 @@ func RunArgs(kind string, spec Spec, cidFile, name string) ([]string, error) {
 	if !validContainerName(name) {
 		return nil, fmt.Errorf("container name must be a vrh-* token")
 	}
-	iso, err := isolationFlags(kind)
+	iso, err := isolationFlags(kind, rootless)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +222,7 @@ func bindMounts(spec Spec) []string {
 	return args
 }
 
-func isolationFlags(kind string) ([]string, error) {
+func isolationFlags(kind string, rootless bool) ([]string, error) {
 	switch kind {
 	case "docker", "podman":
 	default:
@@ -231,16 +238,22 @@ func isolationFlags(kind string) ([]string, error) {
 		"--memory-swap=" + swapLimit,
 		"--pids-limit=" + pidsLimit,
 	}
-	return append(flags, identityFlags(kind)...), nil
+	return append(flags, identityFlags(kind, rootless)...), nil
 }
 
-func identityFlags(kind string) []string {
+func identityFlags(kind string, rootless bool) []string {
 	switch kind {
 	case "podman":
 		// Rootless Podman maps the caller to container uid 0 by default.
 		// keep-id keeps the caller's UID so 0700 bind mounts stay readable.
 		return []string{"--userns=keep-id"}
 	case "docker":
+		if rootless {
+			// Rootless Docker also maps the caller to container uid 0.
+			// --user=hostUid selects a subordinate uid that cannot read
+			// 0700 host bind mounts.
+			return nil
+		}
 		return []string{fmt.Sprintf("--user=%d:%d", os.Getuid(), os.Getgid())}
 	default:
 		return nil
@@ -336,18 +349,18 @@ func (rt Runtime) RequireImage(image string) error {
 	return nil
 }
 
-// Command builds a runtime invocation for spec. Cancel removes the
-// container by name (and cidfile) so a deadline cannot leave a running
-// research box even if the cidfile was not flushed.
-func (rt Runtime) Command(ctx context.Context, spec Spec, cidFile string) (*exec.Cmd, error) {
+// Command builds a runtime invocation for spec. Cancel interrupts the
+// CLI; the returned AfterStop proves the named container is gone so a
+// deadline cannot be recorded while a research box is still running.
+func (rt Runtime) Command(ctx context.Context, spec Spec, cidFile string) (*exec.Cmd, func() error, error) {
 	name := UniqueName()
-	args, err := RunArgs(rt.Kind, spec, cidFile, name)
+	args, err := RunArgs(rt.Kind, spec, cidFile, name, rt.Rootless)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	env, err := clientEnv(rt.Kind)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cmd := exec.CommandContext(ctx, rt.Bin, args...)
 	cmd.Env = env
@@ -355,44 +368,112 @@ func (rt Runtime) Command(ctx context.Context, spec Spec, cidFile string) (*exec
 	cmd.WaitDelay = 2 * time.Second
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
-		rt.removeContainer(name, cidFile)
-		if cmd.Process == nil {
-			return os.ErrProcessDone
+		_ = rt.removeContainer(name, cidFile)
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Process.Kill()
 		}
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		return cmd.Process.Kill()
+		return nil
 	}
-	return cmd, nil
+	return cmd, func() error { return rt.removeContainer(name, cidFile) }, nil
 }
 
-func (rt Runtime) removeContainer(name, cidFile string) {
+func (rt Runtime) removeContainer(name, cidFile string) error {
+	var errs []error
+	provenGone := false
+	if validContainerName(name) {
+		if err := rt.forceRemove(name); err != nil {
+			errs = append(errs, err)
+		} else {
+			provenGone = true
+		}
+	}
+	if cidFile != "" {
+		cid, err := os.ReadFile(cidFile)
+		if err == nil {
+			id := string(bytes.TrimSpace(cid))
+			if id != "" && !strings.HasPrefix(id, "-") {
+				if err := rt.forceRemove(id); err != nil {
+					errs = append(errs, err)
+				} else {
+					provenGone = true
+				}
+			}
+		}
+	}
+	if provenGone {
+		return nil
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
+}
+
+func (rt Runtime) forceRemove(id string) error {
+	out, err := rt.cleanup("rm", "-f", id)
+	if err != nil && !containerAbsent(out) {
+		return fmt.Errorf("rm %s: %s", id, strings.TrimSpace(string(out)))
+	}
+	inspectOut, inspectErr := rt.cleanup("inspect", id)
+	if inspectErr == nil {
+		return fmt.Errorf("container %s still present after rm", id)
+	}
+	if containerAbsent(inspectOut) {
+		return nil
+	}
+	return fmt.Errorf("container %s cleanup unproven: %s", id, strings.TrimSpace(string(inspectOut)))
+}
+
+func containerAbsent(out []byte) bool {
+	s := strings.ToLower(string(out))
+	return strings.Contains(s, "no such container") ||
+		strings.Contains(s, "no such object") ||
+		strings.Contains(s, "no container with name")
+}
+
+func (rt Runtime) cleanup(args ...string) ([]byte, error) {
 	env, err := clientEnv(rt.Kind)
 	if err != nil {
-		return
-	}
-	if validContainerName(name) {
-		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
-		rm := exec.CommandContext(ctx, rt.Bin, "rm", "-f", name)
-		rm.Env = env
-		_, _ = runBounded(rm)
-		cancel()
-	}
-	if cidFile == "" {
-		return
-	}
-	cid, err := os.ReadFile(cidFile)
-	if err != nil {
-		return
-	}
-	id := string(bytes.TrimSpace(cid))
-	if id == "" || strings.HasPrefix(id, "-") {
-		return
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
-	rm := exec.CommandContext(ctx, rt.Bin, "rm", "-f", id)
-	rm.Env = env
-	_, _ = runBounded(rm)
+	cmd := exec.CommandContext(ctx, rt.Bin, args...)
+	cmd.Env = env
+	return runBounded(cmd)
+}
+
+func inspectRootless(kind, bin string, env []string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
+	defer cancel()
+	var cmd *exec.Cmd
+	switch kind {
+	case "docker":
+		cmd = exec.CommandContext(ctx, bin, "info", "--format", "{{json .SecurityOptions}}")
+	case "podman":
+		cmd = exec.CommandContext(ctx, bin, "info", "--format", "{{.Host.Security.Rootless}}")
+	default:
+		return false, fmt.Errorf("unknown container runtime %q", kind)
+	}
+	cmd.Env = env
+	out, err := runBounded(cmd)
+	if err != nil {
+		return false, fmt.Errorf("inspect %s rootless mode: %s", kind, strings.TrimSpace(string(out)))
+	}
+	return rootlessFromInfo(kind, string(out)), nil
+}
+
+func rootlessFromInfo(kind, out string) bool {
+	s := strings.ToLower(strings.TrimSpace(out))
+	switch kind {
+	case "docker":
+		return strings.Contains(s, "rootless")
+	case "podman":
+		return s == "true" || strings.Contains(s, "rootless")
+	default:
+		return false
+	}
 }
 
 func (rt Runtime) preflight(args ...string) ([]byte, error) {
@@ -645,7 +726,7 @@ func UniqueName() string {
 // CaseCommand runs interpreter against the read-only case mount inside the
 // locked container. The host script is bind-mounted; the image supplies
 // the interpreter.
-func (rt Runtime) CaseCommand(ctx context.Context, image, interpreter, script, snapshot, scratch string) (*exec.Cmd, error) {
+func (rt Runtime) CaseCommand(ctx context.Context, image, interpreter, script, snapshot, scratch string) (*exec.Cmd, func() error, error) {
 	spec := Spec{
 		Image:    image,
 		Snapshot: snapshot,

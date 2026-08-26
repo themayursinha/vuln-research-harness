@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -83,8 +82,12 @@ func runRepro(args []string, isolate func() error) error {
 		}
 		runCase = func(c repro.Case) (repro.Outcome, error) {
 			image := campaign.Environment.ContainerImage
-			return repro.RunWith(c, func(ctx context.Context, req repro.StartRequest) (*exec.Cmd, error) {
-				return rt.CaseCommand(ctx, image, req.Interpreter, req.Script, req.Snapshot, req.Scratch)
+			return repro.RunWith(c, func(ctx context.Context, req repro.StartRequest) (*repro.Invocation, error) {
+				cmd, after, err := rt.CaseCommand(ctx, image, req.Interpreter, req.Script, req.Snapshot, req.Scratch)
+				if err != nil {
+					return nil, err
+				}
+				return &repro.Invocation{Cmd: cmd, AfterStop: after}, nil
 			})
 		}
 	}

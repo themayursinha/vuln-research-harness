@@ -27,9 +27,11 @@ memory and pids limits, no published ports, snapshot and script bind-mounted
 read-only, scratch on tmpfs. The campaign must pin
 `environment.container_image` by digest, and that image must already exist
 locally. Remote Docker/Podman endpoints and contexts are refused; the
-runtime must be a local unix socket. Containers are named so a deadline
-cannot leave a running research box. Loopback remains available for local
-fixtures.
+runtime must be a local unix socket. Rootless Docker omits `--user` so
+bind mounts stay readable; rootful Docker uses `--user=uid:gid`. Containers
+are named so a deadline cannot leave a running research box, and a run is
+not a valid timeout until `rm` proves that box is gone. Loopback remains
+available for local fixtures.
 Process-local user namespaces and Landlock are the unit-test sandbox; they
 are not the CLI execution boundary. `vrh verify-sandbox <campaign-dir>`
 proves the runtime applied those flags before a run.

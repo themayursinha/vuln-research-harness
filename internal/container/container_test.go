@@ -47,7 +47,7 @@ func TestRunArgsLocksIsolation(t *testing.T) {
 		Snapshot: snap,
 		Script:   script,
 		Command:  []string{"python3", CaseMount},
-	}, cid, "vrh-test")
+	}, cid, "vrh-test", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestRunArgsRejectsTag(t *testing.T) {
 	_, err := RunArgs("docker", Spec{
 		Image:   "python:3.12",
 		Command: []string{"python3"},
-	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test", false)
 	if err == nil {
 		t.Fatal("mutable tag accepted")
 	}
@@ -90,7 +90,7 @@ func TestRunArgsAcceptsInImageAbsolutePath(t *testing.T) {
 	_, err := RunArgs("docker", Spec{
 		Image:   "sha256:" + strings.Repeat("11", 32),
 		Command: []string{"/usr/bin/python3", CaseMount},
-	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test", false)
 	if err != nil {
 		t.Fatalf("in-image absolute interpreter rejected: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestRunArgsPodmanKeepID(t *testing.T) {
 	args, err := RunArgs("podman", Spec{
 		Image:   "sha256:" + strings.Repeat("11", 32),
 		Command: []string{"python3", CaseMount},
-	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestRunArgsPodmanKeepID(t *testing.T) {
 
 func TestCreateArgsHasNoInterpreter(t *testing.T) {
 	image := "sha256:" + strings.Repeat("11", 32)
-	args, err := CreateArgs("docker", Spec{Image: image}, "vrh-iso")
+	args, err := CreateArgs("docker", Spec{Image: image}, "vrh-iso", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +150,9 @@ func TestCertifyHostConfig(t *testing.T) {
 	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":-1,"PidsLimit":256}}`), Spec{}); err == nil {
 		t.Fatal("unlimited swap accepted")
 	}
+	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":0,"PidsLimit":256}}`), Spec{}); err == nil {
+		t.Fatal("omitted swap limit accepted")
+	}
 	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":536870912,"PidsLimit":256},"Mounts":[{"Destination":"/vrh/snapshot","RW":true,"Type":"bind"}]}`), Spec{Snapshot: "/tmp/snap"}); err == nil {
 		t.Fatal("writable snapshot mount accepted")
 	}
@@ -160,7 +163,7 @@ func TestRunArgsRejectsRelativeBind(t *testing.T) {
 		Image:    "sha256:" + strings.Repeat("11", 32),
 		Snapshot: "snap",
 		Command:  []string{"python3"},
-	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test", false)
 	if err == nil {
 		t.Fatal("relative snapshot accepted")
 	}
@@ -272,7 +275,7 @@ func TestRunArgsRejectsBadName(t *testing.T) {
 	_, err := RunArgs("docker", Spec{
 		Image:   "sha256:" + strings.Repeat("11", 32),
 		Command: []string{"python3"},
-	}, filepath.Join(t.TempDir(), "cid"), "--privileged")
+	}, filepath.Join(t.TempDir(), "cid"), "--privileged", false)
 	if err == nil {
 		t.Fatal("flag-like container name accepted")
 	}
@@ -283,8 +286,49 @@ func TestRunArgsRejectsMountMetacharacters(t *testing.T) {
 		Image:    "sha256:" + strings.Repeat("11", 32),
 		Snapshot: "/tmp/snap,dst=/evil",
 		Command:  []string{"python3"},
-	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test", false)
 	if err == nil {
 		t.Fatal("comma in snapshot path accepted")
+	}
+}
+
+func TestRunArgsDockerRootlessOmitsUser(t *testing.T) {
+	args, err := RunArgs("docker", Spec{
+		Image:   "sha256:" + strings.Repeat("11", 32),
+		Command: []string{"python3", CaseMount},
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--user=") {
+		t.Fatalf("rootless docker must not pass --user: %s", joined)
+	}
+	if strings.Contains(joined, "--userns=keep-id") {
+		t.Fatalf("docker must not use podman keep-id: %s", joined)
+	}
+}
+
+func TestRootlessFromInfo(t *testing.T) {
+	if !rootlessFromInfo("docker", `["name=seccomp,profile=builtin","name=rootless"]`) {
+		t.Fatal("docker rootless SecurityOptions not detected")
+	}
+	if rootlessFromInfo("docker", `["name=seccomp,profile=builtin"]`) {
+		t.Fatal("rootful docker treated as rootless")
+	}
+	if !rootlessFromInfo("podman", "true") {
+		t.Fatal("podman rootless not detected")
+	}
+	if rootlessFromInfo("podman", "false") {
+		t.Fatal("rootful podman treated as rootless")
+	}
+}
+
+func TestContainerAbsent(t *testing.T) {
+	if !containerAbsent([]byte("Error: No such container: vrh-1")) {
+		t.Fatal("docker missing-container message not recognized")
+	}
+	if containerAbsent([]byte("permission denied")) {
+		t.Fatal("daemon error treated as absent")
 	}
 }

@@ -57,9 +57,17 @@ type StartRequest struct {
 	Snapshot    string
 }
 
+// Invocation is one sandboxed process. AfterStop, if set, must prove the
+// execution environment is gone; a timeout is not a safe non-reproduction
+// while a research container may still be running.
+type Invocation struct {
+	Cmd       *exec.Cmd
+	AfterStop func() error
+}
+
 // Starter launches the interpreter against the script. Process-local tests
 // use namespaces; vrh repro uses the container adapter.
-type Starter func(ctx context.Context, req StartRequest) (*exec.Cmd, error)
+type Starter func(ctx context.Context, req StartRequest) (*Invocation, error)
 
 // Run executes the case in a clean temp working directory using the
 // process-local user+network namespace and Landlock write confinement.
@@ -67,14 +75,14 @@ func Run(c Case) (Outcome, error) {
 	return RunWith(c, processLocalStart)
 }
 
-func processLocalStart(ctx context.Context, req StartRequest) (*exec.Cmd, error) {
+func processLocalStart(ctx context.Context, req StartRequest) (*Invocation, error) {
 	cmd, err := startIsolatedCommand(ctx, req.Interpreter, req.Script)
 	if err != nil {
 		return nil, err
 	}
 	cmd.Dir = req.Scratch
 	cmd.Env = reproEnv(req.Scratch, req.Snapshot)
-	return cmd, nil
+	return &Invocation{Cmd: cmd}, nil
 }
 
 // RunWith executes the case using start. A case is vulnerable only when the
@@ -137,7 +145,7 @@ func RunWith(c Case, start Starter) (Outcome, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd, err := start(ctx, StartRequest{
+	inv, err := start(ctx, StartRequest{
 		Interpreter: interpreter,
 		Script:      scriptPath,
 		Scratch:     scratch,
@@ -146,6 +154,10 @@ func RunWith(c Case, start Starter) (Outcome, error) {
 	if err != nil {
 		return outcome, fmt.Errorf("sandbox: %w", err)
 	}
+	if inv == nil || inv.Cmd == nil {
+		return outcome, fmt.Errorf("sandbox starter returned no command")
+	}
+	cmd := inv.Cmd
 	stdout := newCapture(c.Marker)
 	stderr := newCapture("")
 	cmd.Stdout = stdout
@@ -153,6 +165,11 @@ func RunWith(c Case, start Starter) (Outcome, error) {
 
 	startAt := time.Now()
 	runErr := cmd.Run()
+	if inv.AfterStop != nil {
+		if stopErr := inv.AfterStop(); stopErr != nil {
+			return outcome, fmt.Errorf("container cleanup unproven: %w", stopErr)
+		}
+	}
 	outcome.DurationMs = time.Since(startAt).Milliseconds()
 	sum := sha256.New()
 	_, _ = sum.Write(stdout.sum())
