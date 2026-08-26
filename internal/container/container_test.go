@@ -1,0 +1,133 @@
+package container
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestPinnedImage(t *testing.T) {
+	ok := "python@sha256:" + strings.Repeat("ab", 32)
+	id := "sha256:" + strings.Repeat("cd", 32)
+	cases := []struct {
+		ref  string
+		want bool
+	}{
+		{ok, true},
+		{id, true},
+		{"python:3.12", false},
+		{"python@sha256:deadbeef", false},
+		{"python@sha256:" + strings.Repeat("g", 64), false},
+		{"", false},
+		{"python@sha256:" + strings.Repeat("ab", 32) + " extra", false},
+	}
+	for _, tc := range cases {
+		if got := PinnedImage(tc.ref); got != tc.want {
+			t.Errorf("PinnedImage(%q)=%v want %v", tc.ref, got, tc.want)
+		}
+	}
+}
+
+func TestRunArgsLocksIsolation(t *testing.T) {
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "snap")
+	script := filepath.Join(dir, "case.py")
+	if err := os.Mkdir(snap, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("print(1)\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cid := filepath.Join(dir, "cid")
+	image := "localhost/vrh@sha256:" + strings.Repeat("11", 32)
+	args, err := RunArgs(Spec{
+		Image:    image,
+		Snapshot: snap,
+		Script:   script,
+		Command:  []string{"python3", CaseMount},
+	}, cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	for _, need := range []string{"--network=none", "--pull=never", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "ro=true"} {
+		if !strings.Contains(joined, need) {
+			t.Errorf("missing %q in %s", need, joined)
+		}
+	}
+	for _, bad := range []string{"--privileged", "--network=host", "--pull=always", "-p ", "--publish"} {
+		if strings.Contains(joined, bad) {
+			t.Errorf("unsafe flag %q in %s", bad, joined)
+		}
+	}
+	if !strings.Contains(joined, "src="+snap) || !strings.Contains(joined, "dst="+SnapshotMount) {
+		t.Errorf("snapshot mount missing: %s", joined)
+	}
+	if strings.Count(joined, "ro=true") < 2 {
+		t.Errorf("script and snapshot must both be read-only: %s", joined)
+	}
+	if args[len(args)-2] != image || args[len(args)-1] != CaseMount {
+		t.Errorf("entrypoint argv: %v", args)
+	}
+}
+
+func TestRunArgsRejectsTag(t *testing.T) {
+	_, err := RunArgs(Spec{
+		Image:   "python:3.12",
+		Command: []string{"python3"},
+	}, filepath.Join(t.TempDir(), "cid"))
+	if err == nil {
+		t.Fatal("mutable tag accepted")
+	}
+}
+
+func TestRunArgsRejectsHostInterpreter(t *testing.T) {
+	hostPy := filepath.Join(t.TempDir(), "python")
+	if err := os.WriteFile(hostPy, []byte("#!/bin/true\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := RunArgs(Spec{
+		Image:   "sha256:" + strings.Repeat("11", 32),
+		Command: []string{hostPy, CaseMount},
+	}, filepath.Join(t.TempDir(), "cid"))
+	if err == nil {
+		t.Fatal("host interpreter accepted")
+	}
+}
+
+func TestRunArgsRejectsRelativeBind(t *testing.T) {
+	_, err := RunArgs(Spec{
+		Image:    "sha256:" + strings.Repeat("11", 32),
+		Snapshot: "snap",
+		Command:  []string{"python3"},
+	}, filepath.Join(t.TempDir(), "cid"))
+	if err == nil {
+		t.Fatal("relative snapshot accepted")
+	}
+}
+
+func TestRequireImageMissing(t *testing.T) {
+	rt, err := Detect()
+	if err != nil {
+		t.Skip(err)
+	}
+	fake := "localhost/vrh-repro-missing@sha256:" + strings.Repeat("00", 32)
+	if err := rt.RequireImage(fake); err == nil {
+		t.Fatal("missing image accepted")
+	}
+}
+
+func TestLiveVerifyIsolation(t *testing.T) {
+	image := os.Getenv("VRH_TEST_IMAGE")
+	if image == "" {
+		t.Skip("set VRH_TEST_IMAGE to a local digest-pinned python image")
+	}
+	rt, err := Detect()
+	if err != nil {
+		t.Skip(err)
+	}
+	if err := rt.VerifyIsolation(image); err != nil {
+		t.Fatal(err)
+	}
+}

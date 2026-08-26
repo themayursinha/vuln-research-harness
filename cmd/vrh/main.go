@@ -46,7 +46,7 @@ func main() {
 	case "verify-sandbox":
 		err = verifySandboxCmd(os.Args[2:])
 	case "version":
-		fmt.Println("vrh 0.2.0")
+		fmt.Println("vrh 0.3.0")
 	default:
 		usage()
 		os.Exit(2)
@@ -66,7 +66,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  vrh round plan <campaign-dir> <max-workers>")
 	fmt.Fprintln(os.Stderr, "  vrh round ingest <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh repro <cases.yaml> <campaign-dir>")
-	fmt.Fprintln(os.Stderr, "  vrh verify-sandbox")
+	fmt.Fprintln(os.Stderr, "  vrh verify-sandbox <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh adversarial <finding-id> <attempts.json> <summary>")
 	fmt.Fprintln(os.Stderr, "  vrh version")
 }

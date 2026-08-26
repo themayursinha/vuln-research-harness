@@ -17,21 +17,18 @@ internet targets and it does not grant permission to test a system.
 
 ## Non-goals of the current scaffold
 
-The current code does not execute agents, create containers, or enforce
-filesystem limits. Those are future integrations and must not be implied by
-a valid contract. A valid contract is an admission check, not a sandbox.
+The current code does not execute agents or create microVMs. A valid
+contract is an admission check, not a substitute for the container runtime.
 
-`vrh repro` executes each case against a fresh extract of the pinned archive
-inside a new user+network namespace. Landlock allows writes only under a
-scratch directory, so chmod inside the user namespace cannot turn the
-extract into a writable tree. The runner tries to bring loopback up for
-local TCP/UDP fixtures; kernels with `apparmor_restrict_unprivileged_userns`
-may deny that ioctl (bind to 127.0.0.1 still works; connect may not).
-Outbound interfaces are absent. The script sees a stripped environment and
-a process-group deadline. The marker counts only on a successful (exit 0)
-stdout hit. Host-level probes remain a fail-closed preflight; they are not
-a substitute for a container or microVM adapter. `vrh verify-sandbox` runs
-those probes.
+`vrh repro` extracts a fresh copy of the pinned archive for each case and
+runs the script inside a local podman or docker container: `--network=none`,
+`--pull=never`, `--read-only` rootfs, `--cap-drop=ALL`, no published ports,
+snapshot and script bind-mounted read-only, scratch on tmpfs. The campaign
+must pin `environment.container_image` by digest, and that image must
+already exist locally. Loopback remains available for local fixtures.
+Process-local user namespaces and Landlock are the unit-test sandbox; they
+are not the CLI execution boundary. `vrh verify-sandbox <campaign-dir>`
+proves the container boundary before a run.
 
 ## Responsible disclosure
 

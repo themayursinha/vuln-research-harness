@@ -66,14 +66,28 @@ type Verification struct {
 	Problems   []string `json:"problems,omitempty"`
 }
 
-// VerifyNetwork runs the probes and certifies the boundary only when every
-// probe executes successfully and reports BLOCKED. A probe that cannot run,
-// times out, or returns an inconclusive result leaves isolation unproven and
-// fails certification.
+// Runner executes one probe command and returns combined output.
+type Runner func(ctx context.Context, command string, args []string) (output []byte, err error)
+
+// VerifyNetwork runs the probes on the host with exec.Command.
 func VerifyNetwork(probes []NetworkProbe) (Verification, error) {
+	return VerifyWith(probes, func(ctx context.Context, command string, args []string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, command, args...)
+		return cmd.CombinedOutput()
+	})
+}
+
+// VerifyWith runs the probes through run. The boundary is certified only
+// when every probe executes successfully and reports BLOCKED. A probe that
+// cannot run, times out, or returns an inconclusive result leaves isolation
+// unproven and fails certification.
+func VerifyWith(probes []NetworkProbe, run Runner) (Verification, error) {
 	v := Verification{Passed: true}
 	if len(probes) == 0 {
 		return Verification{Passed: false, Problems: []string{"no probes provided; isolation unproven"}}, nil
+	}
+	if run == nil {
+		return Verification{Passed: false, Problems: []string{"no probe runner; isolation unproven"}}, nil
 	}
 	for _, probe := range probes {
 		switch probe.Name {
@@ -86,8 +100,7 @@ func VerifyNetwork(probes []NetworkProbe) (Verification, error) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), probe.Timeout)
-		cmd := exec.CommandContext(ctx, probe.Command, probe.Args...)
-		outBytes, err := cmd.CombinedOutput()
+		outBytes, err := run(ctx, probe.Command, probe.Args)
 		blocked, problem := interpretProbe(probe.Name, string(outBytes), err, ctx.Err())
 		cancel()
 		if probe.Name == "dns_resolution_blocked" {

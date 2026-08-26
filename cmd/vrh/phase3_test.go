@@ -156,3 +156,21 @@ func TestRunReproHonorsTimeoutSeconds(t *testing.T) {
 		t.Fatalf("timeout_seconds was ignored, ran %s", time.Since(start))
 	}
 }
+
+func TestRunReproRefusesWithoutContainerRuntime(t *testing.T) {
+	campaignDir, _ := setupCampaign(t)
+	casesPath := writeReproInputs(t)
+	err := runRepro([]string{casesPath, campaignDir}, nil)
+	if err == nil {
+		t.Fatal("repro ran without a local digest-pinned container image")
+	}
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(casesPath), "repro_outcomes.json")); !os.IsNotExist(statErr) {
+		t.Fatal("outcomes exported despite container failure")
+	}
+}
+
+func TestVerifySandboxRequiresCampaignDir(t *testing.T) {
+	if err := verifySandboxCmd(nil); err == nil {
+		t.Fatal("verify-sandbox accepted no campaign directory")
+	}
+}

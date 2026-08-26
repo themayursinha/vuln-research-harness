@@ -30,6 +30,7 @@ environment:
   deployment: disposable local container
   network: denied
   isolation: rootless container with read-only source mount
+  container_image: localhost/vrh-repro@sha256:...
   synthetic_data: true
   disposable: true
 
@@ -47,4 +48,6 @@ discovery:
 ```
 
 `network` may be `denied` or `allowlisted`. The scaffold deliberately does
-not accept `open` or unspecified networking.
+not accept `open` or unspecified networking. `container_image` must be a
+digest-pinned reference already present on the host (`name@sha256:...` or
+`sha256:...`). `vrh repro` will not pull.

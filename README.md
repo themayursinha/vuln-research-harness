@@ -12,9 +12,10 @@ transition from hypothesis to reproduced impact.
 
 **Status: foundation + controlled execution + validation lane.** The campaign
 contract, approach registry, evidence ledger, snapshot manifest, capability
-gate, manual inbox round loop, reproduction runner, sandbox probes, and
-adversarial validator are implemented and tested. An automated agent runner
-and the container/microVM adapter are not built yet.
+gate, manual inbox round loop, reproduction runner, container adapter
+(digest-pinned local image, `--network=none`, read-only snapshot mount),
+sandbox probes, and adversarial validator are implemented and tested. An
+automated agent runner and a microVM adapter are not built yet.
 See [docs/roadmap.md](docs/roadmap.md) and [docs/campaigns.md](docs/campaigns.md).
 
 ## Why
@@ -100,6 +101,7 @@ internal/worker/    structured request/result schema for research lanes
 internal/coordinator/ round state machine (plan + ingest)
 internal/executor/  manual inbox executor (v1; no target execution)
 internal/repro/     minimal reproduction runner (marker + pinned snapshot)
+internal/container/ disposable OCI adapter (digest-pinned image, network none)
 internal/sandbox/   network-denial probes (fail-closed)
 internal/validate/  adversarial disproof lane
 docs/               method, safety model, contract reference, campaign layout, roadmap
@@ -112,8 +114,8 @@ MIT. See [LICENSE](LICENSE).
 ## Validation lane
 
 ```bash
-# Prove network denial, then run reproduction cases against the pinned snapshot
-vrh verify-sandbox
+# Prove the pinned local image cannot reach the network, then run cases
+vrh verify-sandbox ./campaigns/mcp-filesystem-server
 vrh repro cases.yaml ./campaigns/mcp-filesystem-server
 
 # Record an adversarial validation verdict for a finding
@@ -121,8 +123,9 @@ vrh adversarial F1-json-bypass attempts.json "finding stands"
 ```
 
 `vrh repro` fails closed: it runs the same admission gate as `round plan`
-(contract, manifest digest, source-tree verify), extracts a fresh copy of
-the pinned archive for each case, and places the script in a new
-user+network namespace with Landlock write confinement. Live DNS/TCP
-probes remain a host preflight; skipping `verify-sandbox` does not bypass
-them.
+(contract, manifest digest, source-tree verify), requires a digest-pinned
+**local** container image (`environment.container_image`), and runs each
+case inside podman/docker with `--network=none`, `--pull=never`, a
+read-only rootfs, and a read-only snapshot mount. Host `venv_python` paths
+are refused; the image must provide the interpreter. Process-local
+namespaces remain the unit-test sandbox, not the CLI execution boundary.
