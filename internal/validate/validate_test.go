@@ -47,6 +47,19 @@ func TestFinalizeRejectsEmptyAttempt(t *testing.T) {
 	}
 }
 
+func TestParseAttemptsRequiresBrokeIt(t *testing.T) {
+	if _, err := ParseAttempts([]byte(`[{"name":"check","hypothesis":"control exists","result":"control found"}]`)); err == nil {
+		t.Fatal("omitted broke_it accepted")
+	}
+	attempts, err := ParseAttempts([]byte(`[{"name":"check","hypothesis":"h","result":"r","broke_it":false}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 || attempts[0].BrokeIt {
+		t.Fatalf("explicit false broke_it lost: %+v", attempts)
+	}
+}
+
 func TestSeverityNoteSurvivesExport(t *testing.T) {
 	b := NewBuilder("F4")
 	b.Attempt("check", "h", "r", false).SeverityNote("not RCE; exposure only")

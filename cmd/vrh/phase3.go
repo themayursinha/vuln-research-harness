@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/themayursinha/vuln-research-harness/internal/contract"
+	"github.com/themayursinha/vuln-research-harness/internal/manifest"
 	"github.com/themayursinha/vuln-research-harness/internal/repro"
 	"github.com/themayursinha/vuln-research-harness/internal/sandbox"
 	"github.com/themayursinha/vuln-research-harness/internal/validate"
@@ -56,17 +57,31 @@ func runRepro(args []string, isolate func() error) error {
 	if err != nil {
 		return fmt.Errorf("load campaign: %w", err)
 	}
+	mani, err := manifest.Load(campaignFiles(campaignDir)["manifest"])
+	if err != nil {
+		return fmt.Errorf("load manifest: %w", err)
+	}
+	archivePath := filepath.Join(campaignDir, "source.tar.gz")
 
 	var outcomes []repro.Outcome
 	for _, c := range cases {
+		snapDir, err := os.MkdirTemp("", "vrh-repro-snap-")
+		if err != nil {
+			return fmt.Errorf("create snapshot extract: %w", err)
+		}
+		if err := mani.Extract(archivePath, snapDir); err != nil {
+			os.RemoveAll(snapDir)
+			return err
+		}
 		outcome, err := repro.Run(repro.Case{
 			ID:          c.ID,
 			Finding:     c.Finding,
 			ScriptPath:  c.ScriptPath,
 			Interpreter: resolveInterpreter(c),
 			Marker:      c.Marker,
-			SnapshotDir: campaign.Target.SourcePath,
+			SnapshotDir: snapDir,
 		})
+		os.RemoveAll(snapDir)
 		if err != nil {
 			return err
 		}
@@ -76,6 +91,9 @@ func runRepro(args []string, isolate func() error) error {
 		}
 		fmt.Printf("%-12s %s\n", outcome.CaseID, status)
 		outcomes = append(outcomes, outcome)
+	}
+	if err := mani.Verify(campaign.Target.SourcePath); err != nil {
+		return fmt.Errorf("pinned source mutated during reproduction; refusing to export: %w", err)
 	}
 
 	exportDir := filepath.Dir(casesPath)
@@ -123,14 +141,9 @@ func validateCmd(args []string) error {
 	if err != nil {
 		return fmt.Errorf("read attempts: %w", err)
 	}
-	var attempts []struct {
-		Name       string `json:"name"`
-		Hypothesis string `json:"hypothesis"`
-		Result     string `json:"result"`
-		BrokeIt    bool   `json:"broke_it"`
-	}
-	if err := json.Unmarshal(data, &attempts); err != nil {
-		return fmt.Errorf("parse attempts: %w", err)
+	attempts, err := validate.ParseAttempts(data)
+	if err != nil {
+		return err
 	}
 
 	builder := validate.NewBuilder(findingID)

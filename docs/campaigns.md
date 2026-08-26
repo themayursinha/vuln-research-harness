@@ -44,8 +44,9 @@ contract must load and validate, the campaign `source_snapshot` must equal
 the manifest digest, and the source tree must still verify against the
 manifest — including a check that no file was added or removed since the
 snapshot. A directory with families but no valid authorized contract never
-dispatches work. `vrh repro` additionally refuses to execute scripts unless
-live DNS and TCP probes prove network isolation.
+dispatches work. `vrh repro` additionally extracts a fresh copy of the pinned
+archive for each case, runs the script in a new network namespace, and
+refuses to execute unless live DNS and TCP probes prove host isolation.
 
 The append-only ledger is the **single source of truth**; `registry.json`
 and `state.json` are materialized views reconstructed from it. Every command

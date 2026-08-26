@@ -121,6 +121,7 @@ vrh adversarial F1-json-bypass attempts.json "finding stands"
 ```
 
 `vrh repro` fails closed: it runs the same admission gate as `round plan`
-(contract, manifest digest, source-tree verify) and refuses to execute
-scripts unless live DNS and TCP probes prove isolation. `verify-sandbox`
-is a preflight; skipping it does not bypass the gate.
+(contract, manifest digest, source-tree verify), extracts a fresh copy of
+the pinned archive for each case, and places the script in a new network
+namespace. Live DNS/TCP probes remain a host preflight; skipping
+`verify-sandbox` does not bypass them.

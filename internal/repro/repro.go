@@ -6,6 +6,7 @@ package repro
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,15 +18,20 @@ import (
 	"time"
 )
 
+// DefaultTimeout bounds one reproduction script so a deadlock cannot stall
+// the rest of the campaign.
+const DefaultTimeout = 60 * time.Second
+
 // Case is one reproduction: a script run against the snapshot source with a
 // synthetic marker that must appear in its output if the vulnerability holds.
 type Case struct {
-	ID          string `json:"id"`
-	Finding     string `json:"finding"`
-	ScriptPath  string `json:"script_path"`
-	Interpreter string `json:"interpreter"` // e.g. "python3", "bash"
-	Marker      string `json:"marker"`      // synthetic; must appear when vulnerable
-	SnapshotDir string `json:"snapshot_dir"`
+	ID          string        `json:"id"`
+	Finding     string        `json:"finding"`
+	ScriptPath  string        `json:"script_path"`
+	Interpreter string        `json:"interpreter"` // e.g. "python3", "bash"
+	Marker      string        `json:"marker"`      // synthetic; must appear when vulnerable
+	SnapshotDir string        `json:"snapshot_dir"`
+	Timeout     time.Duration `json:"timeout,omitempty"`
 }
 
 // Outcome records one executed case.
@@ -39,9 +45,8 @@ type Outcome struct {
 }
 
 // Run executes the case in a clean temp working directory. The script sees
-// the snapshot path via the VRH_SNAPSHOT environment variable. Network
-// isolation is enforced upstream by the sandbox adapter, not here — this
-// runner is process-local only.
+// the snapshot path via the VRH_SNAPSHOT environment variable and is placed
+// in a new network namespace so it cannot use the host's outbound access.
 func Run(c Case) (Outcome, error) {
 	outcome := Outcome{CaseID: c.ID}
 	if c.ID == "" || c.ScriptPath == "" || c.Interpreter == "" {
@@ -57,15 +62,25 @@ func Run(c Case) (Outcome, error) {
 		return outcome, fmt.Errorf("snapshot dir not found: %w", err)
 	}
 
+	timeout := c.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+
 	workdir, err := os.MkdirTemp("", "vrh-repro-")
 	if err != nil {
 		return outcome, fmt.Errorf("create workdir: %w", err)
 	}
 	defer os.RemoveAll(workdir)
 
-	cmd := exec.Command(c.Interpreter, c.ScriptPath)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, c.Interpreter, c.ScriptPath)
 	cmd.Dir = workdir
 	cmd.Env = append(os.Environ(), "VRH_SNAPSHOT="+c.SnapshotDir)
+	if err := denyNetwork(cmd); err != nil {
+		return outcome, fmt.Errorf("network namespace: %w", err)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -74,6 +89,14 @@ func Run(c Case) (Outcome, error) {
 	runErr := cmd.Run()
 	outcome.DurationMs = time.Since(start).Milliseconds()
 	output := stdout.String() + stderr.String()
+	sum := sha256.Sum256([]byte(output))
+	outcome.OutputDigest = hex.EncodeToString(sum[:])
+
+	if ctx.Err() == context.DeadlineExceeded {
+		outcome.Vulnerable = false
+		outcome.Error = fmt.Sprintf("timed out after %s; finding did not reproduce", timeout)
+		return outcome, nil
+	}
 
 	var exitCode int
 	if exitErr, ok := runErr.(*exec.ExitError); ok {
@@ -82,9 +105,7 @@ func Run(c Case) (Outcome, error) {
 		return outcome, fmt.Errorf("run script: %w", runErr)
 	}
 
-	sum := sha256.Sum256([]byte(output))
 	outcome.ExitCode = exitCode
-	outcome.OutputDigest = hex.EncodeToString(sum[:])
 	outcome.Vulnerable = bytes.Contains([]byte(output), []byte(c.Marker))
 	if !outcome.Vulnerable {
 		outcome.Error = "marker not observed in output; finding did not reproduce"

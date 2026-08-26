@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeScript(t *testing.T, dir, name, interpreterLine, body string) string {
@@ -67,6 +68,46 @@ func TestRunRejectsEmptyMarker(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("empty marker accepted")
+	}
+}
+
+func TestRunTimesOutHungScript(t *testing.T) {
+	dir := t.TempDir()
+	script := writeScript(t, dir, "hang", "python3", "import time\ntime.sleep(30)\nprint(\"LEAKMARKER\")\n")
+	outcome, err := Run(Case{
+		ID: "f-hang", ScriptPath: script, Interpreter: "python3",
+		Marker: "LEAKMARKER", SnapshotDir: t.TempDir(), Timeout: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Vulnerable {
+		t.Fatalf("timed-out script reported vulnerable: %+v", outcome)
+	}
+	if outcome.Error == "" {
+		t.Fatal("timeout should record an error")
+	}
+}
+
+func TestRunDeniesOutboundNetwork(t *testing.T) {
+	dir := t.TempDir()
+	script := writeScript(t, dir, "net", "python3", `
+import socket
+try:
+    socket.create_connection(("1.1.1.1", 80), timeout=2)
+    print("NETWORK_OK")
+except OSError:
+    print("BLOCKED")
+`)
+	outcome, err := Run(Case{
+		ID: "f-net", ScriptPath: script, Interpreter: "python3",
+		Marker: "NETWORK_OK", SnapshotDir: t.TempDir(), Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Vulnerable {
+		t.Fatalf("reproduction child reached the network: %+v", outcome)
 	}
 }
 

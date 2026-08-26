@@ -4,6 +4,7 @@
 package validate
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -57,6 +58,33 @@ func (b *Builder) Attempt(name, hypothesis, result string, brokeIt bool) *Builde
 func (b *Builder) SeverityNote(note string) *Builder {
 	b.report.SeverityNote = strings.TrimSpace(note)
 	return b
+}
+
+// ParseAttempts decodes a JSON array of disproof attempts. broke_it must be
+// present on every object; a missing field must not silently become false.
+func ParseAttempts(data []byte) ([]DisproofAttempt, error) {
+	var raw []struct {
+		Name       string `json:"name"`
+		Hypothesis string `json:"hypothesis"`
+		Result     string `json:"result"`
+		BrokeIt    *bool  `json:"broke_it"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse attempts: %w", err)
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("no disproof attempts")
+	}
+	attempts := make([]DisproofAttempt, 0, len(raw))
+	for i, item := range raw {
+		if item.BrokeIt == nil {
+			return nil, fmt.Errorf("attempt %d omitted broke_it", i+1)
+		}
+		attempts = append(attempts, DisproofAttempt{
+			Name: item.Name, Hypothesis: item.Hypothesis, Result: item.Result, BrokeIt: *item.BrokeIt,
+		})
+	}
+	return attempts, nil
 }
 
 // Finalize computes the verdict: upheld only when every attempt failed to
