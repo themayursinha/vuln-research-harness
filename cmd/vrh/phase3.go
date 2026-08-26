@@ -69,6 +69,14 @@ func runRepro(args []string, isolate func() error) error {
 			return err
 		}
 	} else {
+		for _, c := range cases {
+			if c.VenvPython != "" {
+				return fmt.Errorf("case %s: venv_python is a host path and cannot run inside the pinned container image", c.ID)
+			}
+			if strings.ContainsRune(c.Interpreter, os.PathSeparator) && !filepath.IsAbs(c.Interpreter) {
+				return fmt.Errorf("case %s: interpreter must be an in-image name or absolute in-image path", c.ID)
+			}
+		}
 		rt, err := requireContainerRuntime(campaign.Environment.ContainerImage)
 		if err != nil {
 			return err
@@ -86,9 +94,6 @@ func runRepro(args []string, isolate func() error) error {
 
 	var outcomes []repro.Outcome
 	for _, c := range cases {
-		if isolate == nil && c.VenvPython != "" {
-			return fmt.Errorf("case %s: venv_python is a host path and cannot run inside the pinned container image", c.ID)
-		}
 		snapDir, err := os.MkdirTemp("", "vrh-repro-snap-")
 		if err != nil {
 			return fmt.Errorf("create snapshot extract: %w", err)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,5 +173,25 @@ func TestRunReproRefusesWithoutContainerRuntime(t *testing.T) {
 func TestVerifySandboxRequiresCampaignDir(t *testing.T) {
 	if err := verifySandboxCmd(nil); err == nil {
 		t.Fatal("verify-sandbox accepted no campaign directory")
+	}
+}
+
+func TestRunReproRefusesHostRelativeInterpreter(t *testing.T) {
+	campaignDir, _ := setupCampaign(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "check.py"), []byte("print('LEAKMARKER')\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	casesPath := filepath.Join(dir, "cases.yaml")
+	content := "- id: f1\n  finding: test\n  script_path: check.py\n  interpreter: venv/bin/python\n  marker: LEAKMARKER\n"
+	if err := os.WriteFile(casesPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := runRepro([]string{casesPath, campaignDir}, nil)
+	if err == nil {
+		t.Fatal("host-relative interpreter accepted on the container path")
+	}
+	if !strings.Contains(err.Error(), "in-image") {
+		t.Fatalf("got %v, want in-image interpreter error", err)
 	}
 }

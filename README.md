@@ -126,7 +126,7 @@ vrh adversarial F1-json-bypass attempts.json "finding stands"
 (contract, manifest digest, source-tree verify), requires a digest-pinned
 **local** container image (`environment.container_image`), and runs each
 case inside podman/docker with `--network=none`, `--pull=never`, a
-read-only rootfs, and a read-only snapshot mount. Remote Docker/Podman
-endpoints are refused. Host `venv_python` paths
+read-only rootfs, resource limits, and a read-only snapshot mount. Remote
+Docker/Podman endpoints are refused. Host `venv_python` paths
 are refused; the image must provide the interpreter. Process-local
 namespaces remain the unit-test sandbox, not the CLI execution boundary.

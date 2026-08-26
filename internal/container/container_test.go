@@ -47,12 +47,12 @@ func TestRunArgsLocksIsolation(t *testing.T) {
 		Snapshot: snap,
 		Script:   script,
 		Command:  []string{"python3", CaseMount},
-	}, cid)
+	}, cid, "vrh-test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(args, " ")
-	for _, need := range []string{"--network=none", "--pull=never", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "ro=true"} {
+	for _, need := range []string{"--network=none", "--pull=never", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--memory=512m", "--memory-swap=512m", "--pids-limit=256", "--name=vrh-test", "ro=true"} {
 		if !strings.Contains(joined, need) {
 			t.Errorf("missing %q in %s", need, joined)
 		}
@@ -80,7 +80,7 @@ func TestRunArgsRejectsTag(t *testing.T) {
 	_, err := RunArgs("docker", Spec{
 		Image:   "python:3.12",
 		Command: []string{"python3"},
-	}, filepath.Join(t.TempDir(), "cid"))
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
 	if err == nil {
 		t.Fatal("mutable tag accepted")
 	}
@@ -90,7 +90,7 @@ func TestRunArgsAcceptsInImageAbsolutePath(t *testing.T) {
 	_, err := RunArgs("docker", Spec{
 		Image:   "sha256:" + strings.Repeat("11", 32),
 		Command: []string{"/usr/bin/python3", CaseMount},
-	}, filepath.Join(t.TempDir(), "cid"))
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
 	if err != nil {
 		t.Fatalf("in-image absolute interpreter rejected: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestRunArgsPodmanKeepID(t *testing.T) {
 	args, err := RunArgs("podman", Spec{
 		Image:   "sha256:" + strings.Repeat("11", 32),
 		Command: []string{"python3", CaseMount},
-	}, filepath.Join(t.TempDir(), "cid"))
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestRunArgsPodmanKeepID(t *testing.T) {
 
 func TestCreateArgsHasNoInterpreter(t *testing.T) {
 	image := "sha256:" + strings.Repeat("11", 32)
-	args, err := CreateArgs("docker", image)
+	args, err := CreateArgs("docker", Spec{Image: image}, "vrh-iso")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,15 +131,27 @@ func TestCreateArgsHasNoInterpreter(t *testing.T) {
 }
 
 func TestCertifyHostConfig(t *testing.T) {
-	good := []byte(`{"HostConfig":{"NetworkMode":"none","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"]}}`)
-	if err := certifyHostConfig(good); err != nil {
+	good := []byte(`{"HostConfig":{"NetworkMode":"none","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":536870912,"PidsLimit":256}}`)
+	if err := certifyHostConfig(good, Spec{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"bridge","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"]}}`)); err == nil {
+	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"bridge","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":536870912,"PidsLimit":256}}`), Spec{}); err == nil {
 		t.Fatal("bridge network accepted")
 	}
-	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","Privileged":true,"ReadonlyRootfs":true,"CapDrop":["ALL"]}}`)); err == nil {
+	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","Privileged":true,"ReadonlyRootfs":true,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":536870912,"PidsLimit":256}}`), Spec{}); err == nil {
 		t.Fatal("privileged accepted")
+	}
+	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","PidMode":"host","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":536870912,"PidsLimit":256}}`), Spec{}); err == nil {
+		t.Fatal("pid=host accepted")
+	}
+	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"CapAdd":["NET_ADMIN"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":536870912,"PidsLimit":256}}`), Spec{}); err == nil {
+		t.Fatal("cap-add accepted")
+	}
+	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":-1,"PidsLimit":256}}`), Spec{}); err == nil {
+		t.Fatal("unlimited swap accepted")
+	}
+	if err := certifyHostConfig([]byte(`{"HostConfig":{"NetworkMode":"none","Privileged":false,"ReadonlyRootfs":true,"CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"],"Memory":536870912,"MemorySwap":536870912,"PidsLimit":256},"Mounts":[{"Destination":"/vrh/snapshot","RW":true,"Type":"bind"}]}`), Spec{Snapshot: "/tmp/snap"}); err == nil {
+		t.Fatal("writable snapshot mount accepted")
 	}
 }
 
@@ -148,7 +160,7 @@ func TestRunArgsRejectsRelativeBind(t *testing.T) {
 		Image:    "sha256:" + strings.Repeat("11", 32),
 		Snapshot: "snap",
 		Command:  []string{"python3"},
-	}, filepath.Join(t.TempDir(), "cid"))
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
 	if err == nil {
 		t.Fatal("relative snapshot accepted")
 	}
@@ -186,7 +198,8 @@ func TestIsLocalUnixEndpoint(t *testing.T) {
 	}{
 		{"unix:///var/run/docker.sock", true},
 		{"/var/run/docker.sock", true},
-		{"unix:///run/user/1000/podman/podman.sock", true},
+		{"unix://localhost/var/run/docker.sock", false},
+		{"unix://192.0.2.1/var/run/docker.sock", false},
 		{"tcp://192.0.2.1:2375", false},
 		{"ssh://user@host", false},
 		{"npipe:////./pipe/docker_engine", false},
@@ -238,6 +251,9 @@ func TestClientEnvPinsUnixAndDropsContext(t *testing.T) {
 	if strings.Contains(joined, "DOCKER_CONTEXT=") {
 		t.Fatalf("DOCKER_CONTEXT must not be forwarded: %s", joined)
 	}
+	if !strings.Contains(joined, "CONTAINER_HOST=unix:///var/run/docker.sock") {
+		t.Fatalf("CONTAINER_HOST must be pinned to the local socket: %s", joined)
+	}
 }
 
 func TestPreflightTimeoutsAreBounded(t *testing.T) {
@@ -246,5 +262,29 @@ func TestPreflightTimeoutsAreBounded(t *testing.T) {
 	}
 	if cleanupTimeout <= 0 || cleanupTimeout > preflightTimeout {
 		t.Fatalf("cleanupTimeout=%s", cleanupTimeout)
+	}
+	if maxPreflightOut < 4096 || maxPreflightOut > 4<<20 {
+		t.Fatalf("maxPreflightOut=%d", maxPreflightOut)
+	}
+}
+
+func TestRunArgsRejectsBadName(t *testing.T) {
+	_, err := RunArgs("docker", Spec{
+		Image:   "sha256:" + strings.Repeat("11", 32),
+		Command: []string{"python3"},
+	}, filepath.Join(t.TempDir(), "cid"), "--privileged")
+	if err == nil {
+		t.Fatal("flag-like container name accepted")
+	}
+}
+
+func TestRunArgsRejectsMountMetacharacters(t *testing.T) {
+	_, err := RunArgs("docker", Spec{
+		Image:    "sha256:" + strings.Repeat("11", 32),
+		Snapshot: "/tmp/snap,dst=/evil",
+		Command:  []string{"python3"},
+	}, filepath.Join(t.TempDir(), "cid"), "vrh-test")
+	if err == nil {
+		t.Fatal("comma in snapshot path accepted")
 	}
 }
