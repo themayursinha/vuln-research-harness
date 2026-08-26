@@ -145,7 +145,8 @@ func validateCmd(args []string) error {
 	if len(args) < 3 {
 		return errors.New("adversarial requires <finding-id> <attempts.json> <summary>")
 	}
-	findingID, attemptsPath, summary := args[0], args[1], strings.Join(args[2:], " ")
+	findingID := strings.TrimSpace(args[0])
+	attemptsPath, summary := args[1], strings.Join(args[2:], " ")
 	data, err := os.ReadFile(attemptsPath)
 	if err != nil {
 		return fmt.Errorf("read attempts: %w", err)
@@ -168,7 +169,7 @@ func validateCmd(args []string) error {
 		return err
 	}
 	dir := filepath.Dir(attemptsPath)
-	outPath := filepath.Join(dir, "validation_"+findingID+".json")
+	outPath := filepath.Join(dir, "validation_"+report.FindingID+".json")
 	tmp := outPath + ".tmp"
 	if err := os.WriteFile(tmp, out, 0600); err != nil {
 		return err
@@ -176,7 +177,7 @@ func validateCmd(args []string) error {
 	if err := os.Rename(tmp, outPath); err != nil {
 		return err
 	}
-	fmt.Printf("finding %s verdict: %s (%d attempts)\nwritten to %s\n", findingID, report.Verdict, len(report.Attempts), outPath)
+	fmt.Printf("finding %s verdict: %s (%d attempts)\nwritten to %s\n", report.FindingID, report.Verdict, len(report.Attempts), outPath)
 	return nil
 }
 

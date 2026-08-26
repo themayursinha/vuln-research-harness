@@ -158,14 +158,17 @@ func restrictFS(scratch string) error {
 }
 
 func landlockHandledFS(abi uintptr) uint64 {
+	// Filesystem rights by ABI: v1 EXECUTE..MAKE_SYM (13), v2 +REFER,
+	// v3 +TRUNCATE. v4 added network rights only. IOCTL_DEV is v5.
 	bits := 13
-	switch {
-	case abi >= 4:
-		bits = 16
-	case abi == 3:
-		bits = 15
-	case abi == 2:
+	if abi >= 2 {
 		bits = 14
+	}
+	if abi >= 3 {
+		bits = 15
+	}
+	if abi >= 5 {
+		bits = 16
 	}
 	return 1<<bits - 1
 }

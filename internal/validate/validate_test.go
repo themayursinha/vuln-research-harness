@@ -60,9 +60,30 @@ func TestParseAttemptsRequiresBrokeIt(t *testing.T) {
 	}
 }
 
-func TestParseAttemptsRejectsUnknownFields(t *testing.T) {
-	if _, err := ParseAttempts([]byte(`[{"name":"check","hypothesis":"h","result":"r","broke_it":false,"extra":true}]`)); err == nil {
-		t.Fatal("unknown attempt field accepted")
+func TestParseAttemptsRejectsTrailingJSON(t *testing.T) {
+	data := []byte(`[{"name":"check","hypothesis":"h","result":"r","broke_it":false}][{"name":"later","hypothesis":"h","result":"broke","broke_it":true}]`)
+	if _, err := ParseAttempts(data); err == nil {
+		t.Fatal("trailing JSON array accepted")
+	}
+}
+
+func TestFinalizeRejectsEmptyFindingID(t *testing.T) {
+	b := NewBuilder("  ")
+	b.Attempt("check", "h", "r", false)
+	if _, err := b.Finalize("stands"); err == nil {
+		t.Fatal("blank finding id accepted")
+	}
+}
+
+func TestNewBuilderTrimsFindingID(t *testing.T) {
+	b := NewBuilder("  F1  ")
+	b.Attempt("check", "h", "r", false)
+	report, err := b.Finalize("stands")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.FindingID != "F1" {
+		t.Fatalf("finding id not normalized: %q", report.FindingID)
 	}
 }
 

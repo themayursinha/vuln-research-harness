@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -42,7 +43,7 @@ type Builder struct {
 
 // NewBuilder starts a validation report for a finding.
 func NewBuilder(findingID string) *Builder {
-	return &Builder{report: Report{FindingID: findingID}}
+	return &Builder{report: Report{FindingID: strings.TrimSpace(findingID)}}
 }
 
 // Attempt records one disproof attempt. brokeIt=true means the finding did
@@ -75,6 +76,9 @@ func ParseAttempts(data []byte) ([]DisproofAttempt, error) {
 	if err := dec.Decode(&raw); err != nil {
 		return nil, fmt.Errorf("parse attempts: %w", err)
 	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("parse attempts: trailing JSON after attempts array")
+	}
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("no disproof attempts")
 	}
@@ -93,6 +97,9 @@ func ParseAttempts(data []byte) ([]DisproofAttempt, error) {
 // Finalize computes the verdict: upheld only when every attempt failed to
 // break the finding AND at least one attempt was made.
 func (b *Builder) Finalize(summary string) (Report, error) {
+	if strings.TrimSpace(b.report.FindingID) == "" {
+		return Report{}, fmt.Errorf("finding id is required; refusing to export an unattributed validation report")
+	}
 	if len(b.report.Attempts) == 0 {
 		return Report{}, fmt.Errorf("finding %s has no disproof attempts; cannot validate", b.report.FindingID)
 	}
