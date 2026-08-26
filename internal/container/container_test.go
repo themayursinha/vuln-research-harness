@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPinnedImage(t *testing.T) {
@@ -175,5 +176,75 @@ func TestLiveVerifyIsolation(t *testing.T) {
 	}
 	if err := rt.VerifyIsolation(image); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestIsLocalUnixEndpoint(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"unix:///var/run/docker.sock", true},
+		{"/var/run/docker.sock", true},
+		{"unix:///run/user/1000/podman/podman.sock", true},
+		{"tcp://192.0.2.1:2375", false},
+		{"ssh://user@host", false},
+		{"npipe:////./pipe/docker_engine", false},
+		{"fd://3", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isLocalUnixEndpoint(tc.in); got != tc.want {
+			t.Errorf("isLocalUnixEndpoint(%q)=%v want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestClientEnvRefusesRemoteHost(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "tcp://192.0.2.1:2375")
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("CONTAINER_HOST", "")
+	if _, err := clientEnv("docker"); err == nil {
+		t.Fatal("remote DOCKER_HOST accepted")
+	}
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("CONTAINER_HOST", "ssh://lab")
+	if _, err := clientEnv("podman"); err == nil {
+		t.Fatal("remote CONTAINER_HOST accepted")
+	}
+}
+
+func TestClientEnvRefusesPodmanConnection(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("CONTAINER_HOST", "")
+	t.Setenv("CONTAINER_CONNECTION", "remote-lab")
+	if _, err := clientEnv("podman"); err == nil {
+		t.Fatal("named Podman connection accepted")
+	}
+}
+
+func TestClientEnvPinsUnixAndDropsContext(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
+	t.Setenv("DOCKER_CONTEXT", "remote-lab")
+	t.Setenv("CONTAINER_HOST", "")
+	env, err := clientEnv("docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "DOCKER_HOST=unix:///var/run/docker.sock") {
+		t.Fatalf("local unix host not pinned: %s", joined)
+	}
+	if strings.Contains(joined, "DOCKER_CONTEXT=") {
+		t.Fatalf("DOCKER_CONTEXT must not be forwarded: %s", joined)
+	}
+}
+
+func TestPreflightTimeoutsAreBounded(t *testing.T) {
+	if preflightTimeout <= 0 || preflightTimeout > 30*time.Second {
+		t.Fatalf("preflightTimeout=%s; want a short fail-closed bound", preflightTimeout)
+	}
+	if cleanupTimeout <= 0 || cleanupTimeout > preflightTimeout {
+		t.Fatalf("cleanupTimeout=%s", cleanupTimeout)
 	}
 }

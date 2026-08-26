@@ -25,7 +25,9 @@ runs the script inside a local podman or docker container: `--network=none`,
 `--pull=never`, `--read-only` rootfs, `--cap-drop=ALL`, no published ports,
 snapshot and script bind-mounted read-only, scratch on tmpfs. The campaign
 must pin `environment.container_image` by digest, and that image must
-already exist locally. Loopback remains available for local fixtures.
+already exist locally. Remote Docker/Podman endpoints and contexts are
+refused; the runtime must be a local unix socket. Loopback remains
+available for local fixtures.
 Process-local user namespaces and Landlock are the unit-test sandbox; they
 are not the CLI execution boundary. `vrh verify-sandbox <campaign-dir>`
 proves the runtime applied those flags before a run.

@@ -20,6 +20,9 @@ const (
 	SnapshotMount = "/vrh/snapshot"
 	CaseMount     = "/vrh/case"
 	ScratchMount  = "/vrh/scratch"
+
+	preflightTimeout = 15 * time.Second
+	cleanupTimeout   = 5 * time.Second
 )
 
 // Runtime is a local podman or docker binary that can run a locked spec.
@@ -38,20 +41,32 @@ type Spec struct {
 	Command  []string
 }
 
-// Detect finds a working podman or docker binary. It does not pull images
-// and does not create containers.
+// Detect finds a working local podman or docker binary. It does not pull
+// images, does not create containers, and refuses a remote daemon.
 func Detect() (Runtime, error) {
+	var remoteErr error
 	for _, kind := range []string{"podman", "docker"} {
 		bin, err := exec.LookPath(kind)
 		if err != nil {
 			continue
 		}
-		cmd := exec.Command(bin, "version")
-		cmd.Env = clientEnv()
-		if err := cmd.Run(); err != nil {
+		env, err := clientEnv(kind)
+		if err != nil {
+			remoteErr = err
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
+		cmd := exec.CommandContext(ctx, bin, "version")
+		cmd.Env = env
+		err = cmd.Run()
+		cancel()
+		if err != nil {
 			continue
 		}
 		return Runtime{Bin: bin, Kind: kind}, nil
+	}
+	if remoteErr != nil {
+		return Runtime{}, remoteErr
 	}
 	return Runtime{}, fmt.Errorf("no container runtime (podman or docker) is available")
 }
@@ -247,9 +262,7 @@ func (rt Runtime) RequireImage(image string) error {
 	if !PinnedImage(image) {
 		return fmt.Errorf("container image must be digest-pinned (@sha256:...); got %q", image)
 	}
-	cmd := exec.Command(rt.Bin, "image", "inspect", "--format", "{{.Id}}", image)
-	cmd.Env = clientEnv()
-	out, err := cmd.CombinedOutput()
+	out, err := rt.preflight("image", "inspect", "--format", "{{.Id}}", image)
 	if err != nil {
 		return fmt.Errorf("image %s is not present locally; refusing to pull: %s", image, strings.TrimSpace(string(out)))
 	}
@@ -266,8 +279,12 @@ func (rt Runtime) Command(ctx context.Context, spec Spec, cidFile string) (*exec
 	if err != nil {
 		return nil, err
 	}
+	env, err := clientEnv(rt.Kind)
+	if err != nil {
+		return nil, err
+	}
 	cmd := exec.CommandContext(ctx, rt.Bin, args...)
-	cmd.Env = clientEnv()
+	cmd.Env = env
 	cmd.Dir = filepath.Dir(cidFile)
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Cancel = func() error {
@@ -289,21 +306,210 @@ func (rt Runtime) removeCID(cidFile string) {
 	if id == "" {
 		return
 	}
-	rm := exec.Command(rt.Bin, "rm", "-f", id)
-	rm.Env = clientEnv()
+	env, err := clientEnv(rt.Kind)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cancel()
+	rm := exec.CommandContext(ctx, rt.Bin, "rm", "-f", id)
+	rm.Env = env
 	_ = rm.Run()
 }
 
-func clientEnv() []string {
-	keys := []string{"PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "CONTAINER_HOST", "XDG_RUNTIME_DIR"}
-	var env []string
-	for _, key := range keys {
-		if v := os.Getenv(key); v != "" {
-			env = append(env, key+"="+v)
+func (rt Runtime) preflight(args ...string) ([]byte, error) {
+	env, err := clientEnv(rt.Kind)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, rt.Bin, args...)
+	cmd.Env = env
+	return cmd.CombinedOutput()
+}
+
+// clientEnv is the subprocess environment for podman/docker. It never
+// forwards DOCKER_CONTEXT or CONTAINER_CONNECTION, and it only sets
+// DOCKER_HOST/CONTAINER_HOST to a local unix socket. Remote tcp/ssh
+// endpoints are refused so vrh repro cannot leave this machine.
+func clientEnv(kind string) ([]string, error) {
+	host, err := localRuntimeHost(kind)
+	if err != nil {
+		return nil, err
+	}
+	path := os.Getenv("PATH")
+	if path == "" {
+		path = "/usr/bin:/bin"
+	}
+	env := []string{"PATH=" + path}
+	if v := os.Getenv("HOME"); v != "" {
+		env = append(env, "HOME="+v)
+	}
+	if v := os.Getenv("XDG_RUNTIME_DIR"); v != "" {
+		env = append(env, "XDG_RUNTIME_DIR="+v)
+	}
+	if host != "" {
+		env = append(env, "DOCKER_HOST="+host, "CONTAINER_HOST="+host)
+	}
+	return env, nil
+}
+
+func localRuntimeHost(kind string) (string, error) {
+	if err := rejectRemoteEnv(kind); err != nil {
+		return "", err
+	}
+	if h := explicitUnixHost(kind); h != "" {
+		return normalizeUnixHost(h), nil
+	}
+	if kind == "docker" {
+		h, err := dockerContextHost()
+		if err == nil {
+			h = strings.TrimSpace(h)
+			if h != "" && !isLocalUnixEndpoint(h) {
+				return "", fmt.Errorf("refusing remote Docker endpoint %s; VRH only uses a local unix socket", h)
+			}
+			if isLocalUnixEndpoint(h) {
+				return normalizeUnixHost(h), nil
+			}
 		}
 	}
-	if len(env) == 0 {
-		return []string{"PATH=/usr/bin:/bin"}
+	if sock := probeLocalSocket(kind); sock != "" {
+		return sock, nil
+	}
+	if kind == "docker" {
+		return "", fmt.Errorf("no local unix socket for docker; VRH refuses remote or unproven runtimes")
+	}
+	// Rootless podman can start its own local service without an existing socket.
+	return "", nil
+}
+
+func rejectRemoteEnv(kind string) error {
+	keys := []string{"DOCKER_HOST"}
+	if kind == "podman" {
+		keys = []string{"CONTAINER_HOST", "DOCKER_HOST"}
+	}
+	for _, key := range keys {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v == "" {
+			continue
+		}
+		if !isLocalUnixEndpoint(v) {
+			return fmt.Errorf("refusing remote container runtime (%s=%s); VRH only uses a local unix socket", key, v)
+		}
+	}
+	if kind == "podman" {
+		if v := os.Getenv("CONTAINER_CONNECTION"); v != "" {
+			return fmt.Errorf("refusing Podman connection %q; VRH only uses a local unix socket", v)
+		}
+	}
+	return nil
+}
+
+func explicitUnixHost(kind string) string {
+	keys := []string{"DOCKER_HOST"}
+	if kind == "podman" {
+		keys = []string{"CONTAINER_HOST", "DOCKER_HOST"}
+	}
+	for _, key := range keys {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func isLocalUnixEndpoint(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return false
+	}
+	if strings.HasPrefix(v, "unix://") {
+		return true
+	}
+	if strings.HasPrefix(v, "/") && !strings.Contains(v, "://") {
+		return true
+	}
+	return false
+}
+
+func normalizeUnixHost(v string) string {
+	v = strings.TrimSpace(v)
+	if strings.HasPrefix(v, "/") && !strings.HasPrefix(v, "unix://") {
+		return "unix://" + v
+	}
+	return v
+}
+
+func probeLocalSocket(kind string) string {
+	xdg := os.Getenv("XDG_RUNTIME_DIR")
+	if xdg == "" {
+		xdg = fmt.Sprintf("/run/user/%d", os.Getuid())
+	}
+	var candidates []string
+	switch kind {
+	case "docker":
+		candidates = []string{
+			filepath.Join(xdg, "docker.sock"),
+			"/var/run/docker.sock",
+			"/run/docker.sock",
+		}
+	case "podman":
+		candidates = []string{
+			filepath.Join(xdg, "podman", "podman.sock"),
+			"/run/podman/podman.sock",
+			"/var/run/podman/podman.sock",
+		}
+	}
+	for _, p := range candidates {
+		st, err := os.Stat(p)
+		if err != nil || st.Mode()&os.ModeSocket == 0 {
+			continue
+		}
+		return "unix://" + p
+	}
+	return ""
+}
+
+func dockerContextHost() (string, error) {
+	bin, err := exec.LookPath("docker")
+	if err != nil {
+		return "", err
+	}
+	env := inspectEnv()
+	ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
+	defer cancel()
+	show := exec.CommandContext(ctx, bin, "context", "show")
+	show.Env = env
+	nameOut, err := show.Output()
+	if err != nil {
+		return "", err
+	}
+	name := strings.TrimSpace(string(nameOut))
+	if name == "" {
+		name = "default"
+	}
+	inspect := exec.CommandContext(ctx, bin, "context", "inspect", name, "--format", "{{.Endpoints.docker.Host}}")
+	inspect.Env = env
+	hostOut, err := inspect.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(hostOut)), nil
+}
+
+func inspectEnv() []string {
+	path := os.Getenv("PATH")
+	if path == "" {
+		path = "/usr/bin:/bin"
+	}
+	env := []string{"PATH=" + path}
+	if v := os.Getenv("HOME"); v != "" {
+		env = append(env, "HOME="+v)
+	}
+	if v := os.Getenv("DOCKER_CONTEXT"); v != "" {
+		env = append(env, "DOCKER_CONTEXT="+v)
 	}
 	return env
 }

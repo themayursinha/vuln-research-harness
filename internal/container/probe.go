@@ -3,7 +3,6 @@ package container
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -83,25 +82,19 @@ func (rt Runtime) VerifyIsolation(image string) error {
 	if err != nil {
 		return err
 	}
-	create := exec.Command(rt.Bin, args...)
-	create.Env = clientEnv()
-	out, err := create.CombinedOutput()
+	createOut, err := rt.preflight(args...)
 	if err != nil {
-		return fmt.Errorf("create isolation probe: %s", strings.TrimSpace(string(out)))
+		return fmt.Errorf("create isolation probe: %s", strings.TrimSpace(string(createOut)))
 	}
-	cid := strings.TrimSpace(string(out))
+	cid := strings.TrimSpace(string(createOut))
 	if cid == "" {
 		return fmt.Errorf("create isolation probe returned no container id")
 	}
 	defer func() {
-		rm := exec.Command(rt.Bin, "rm", "-f", cid)
-		rm.Env = clientEnv()
-		_ = rm.Run()
+		_, _ = rt.preflight("rm", "-f", cid)
 	}()
 
-	inspect := exec.Command(rt.Bin, "inspect", cid)
-	inspect.Env = clientEnv()
-	raw, err := inspect.CombinedOutput()
+	raw, err := rt.preflight("inspect", cid)
 	if err != nil {
 		return fmt.Errorf("inspect isolation probe: %s", strings.TrimSpace(string(raw)))
 	}
