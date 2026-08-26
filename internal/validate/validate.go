@@ -4,6 +4,7 @@
 package validate
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -69,7 +70,9 @@ func ParseAttempts(data []byte) ([]DisproofAttempt, error) {
 		Result     string `json:"result"`
 		BrokeIt    *bool  `json:"broke_it"`
 	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
 		return nil, fmt.Errorf("parse attempts: %w", err)
 	}
 	if len(raw) == 0 {

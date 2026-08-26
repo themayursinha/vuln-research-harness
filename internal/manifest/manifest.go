@@ -292,7 +292,38 @@ func (m Manifest) Extract(archivePath, dest string) error {
 	if err := m.Verify(dest); err != nil {
 		return fmt.Errorf("extracted snapshot does not match manifest: %w", err)
 	}
+	if err := makeReadOnly(dest); err != nil {
+		return fmt.Errorf("lock extracted snapshot: %w", err)
+	}
 	return nil
+}
+
+// RemoveReadOnly restores write bits then deletes a tree produced by Extract.
+func RemoveReadOnly(dir string) error {
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		mode := os.FileMode(0700)
+		if !d.IsDir() {
+			mode = 0600
+		}
+		_ = os.Chmod(p, mode)
+		return nil
+	})
+	return os.RemoveAll(dir)
+}
+
+func makeReadOnly(root string) error {
+	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.Chmod(p, 0555)
+		}
+		return os.Chmod(p, 0444)
+	})
 }
 
 func safeArchivePath(name string) (string, error) {

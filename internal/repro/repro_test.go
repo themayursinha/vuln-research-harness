@@ -111,6 +111,62 @@ except OSError:
 	}
 }
 
+func TestRunRejectsNonzeroExitEvenWithMarker(t *testing.T) {
+	dir := t.TempDir()
+	script := writeScript(t, dir, "crash", "python3", "print(\"LEAKMARKER\")\nraise SystemExit(1)\n")
+	outcome, err := Run(Case{
+		ID: "f-crash", ScriptPath: script, Interpreter: "python3",
+		Marker: "LEAKMARKER", SnapshotDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Vulnerable {
+		t.Fatalf("nonzero exit reported vulnerable: %+v", outcome)
+	}
+}
+
+func TestRunResolvesRelativeScriptPath(t *testing.T) {
+	dir := t.TempDir()
+	writeScript(t, dir, "rel", "python3", "print(\"LEAKMARKER\")\n")
+	t.Chdir(dir)
+	outcome, err := Run(Case{
+		ID: "f-rel", ScriptPath: "rel.py", Interpreter: "python3",
+		Marker: "LEAKMARKER", SnapshotDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.Vulnerable {
+		t.Fatalf("relative script path failed after workdir change: %+v", outcome)
+	}
+}
+
+func TestRunKillsDescendantsAtDeadline(t *testing.T) {
+	dir := t.TempDir()
+	script := writeScript(t, dir, "fork", "python3", `
+import os, time
+if os.fork() == 0:
+    time.sleep(30)
+time.sleep(30)
+print("LEAKMARKER")
+`)
+	start := time.Now()
+	outcome, err := Run(Case{
+		ID: "f-fork", ScriptPath: script, Interpreter: "python3",
+		Marker: "LEAKMARKER", SnapshotDir: t.TempDir(), Timeout: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("deadline did not kill descendants, ran %s", time.Since(start))
+	}
+	if outcome.Vulnerable {
+		t.Fatalf("forked hang reported vulnerable: %+v", outcome)
+	}
+}
+
 func TestExportWritesJSONAtomically(t *testing.T) {
 	dir := t.TempDir()
 	outcomes := []Outcome{{CaseID: "c1", Vulnerable: true}}

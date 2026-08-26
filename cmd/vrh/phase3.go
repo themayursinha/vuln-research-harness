@@ -62,6 +62,7 @@ func runRepro(args []string, isolate func() error) error {
 		return fmt.Errorf("load manifest: %w", err)
 	}
 	archivePath := filepath.Join(campaignDir, "source.tar.gz")
+	casesDir := filepath.Dir(casesPath)
 
 	var outcomes []repro.Outcome
 	for _, c := range cases {
@@ -70,18 +71,18 @@ func runRepro(args []string, isolate func() error) error {
 			return fmt.Errorf("create snapshot extract: %w", err)
 		}
 		if err := mani.Extract(archivePath, snapDir); err != nil {
-			os.RemoveAll(snapDir)
+			_ = manifest.RemoveReadOnly(snapDir)
 			return err
 		}
 		outcome, err := repro.Run(repro.Case{
 			ID:          c.ID,
 			Finding:     c.Finding,
-			ScriptPath:  c.ScriptPath,
-			Interpreter: resolveInterpreter(c),
+			ScriptPath:  resolvePath(casesDir, c.ScriptPath),
+			Interpreter: resolveInterpreter(casesDir, c),
 			Marker:      c.Marker,
 			SnapshotDir: snapDir,
 		})
-		os.RemoveAll(snapDir)
+		_ = manifest.RemoveReadOnly(snapDir)
 		if err != nil {
 			return err
 		}
@@ -174,9 +175,16 @@ func validateCmd(args []string) error {
 // resolveInterpreter prefers a case-specific interpreter (e.g. the target
 // project's venv python) when one is configured, falling back to the generic
 // interpreter name.
-func resolveInterpreter(c reproCaseFile) string {
+func resolveInterpreter(casesDir string, c reproCaseFile) string {
 	if c.VenvPython != "" {
-		return c.VenvPython
+		return resolvePath(casesDir, c.VenvPython)
 	}
 	return c.Interpreter
+}
+
+func resolvePath(base, p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(base, p)
 }

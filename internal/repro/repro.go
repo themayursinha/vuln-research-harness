@@ -45,8 +45,10 @@ type Outcome struct {
 }
 
 // Run executes the case in a clean temp working directory. The script sees
-// the snapshot path via the VRH_SNAPSHOT environment variable and is placed
-// in a new network namespace so it cannot use the host's outbound access.
+// the snapshot path via VRH_SNAPSHOT, inherits a stripped environment, and
+// is placed in a new network namespace. A case is vulnerable only when the
+// interpreter exits 0 and the marker appears on stdout — a crash or syntax
+// error that echoes the marker is not evidence.
 func Run(c Case) (Outcome, error) {
 	outcome := Outcome{CaseID: c.ID}
 	if c.ID == "" || c.ScriptPath == "" || c.Interpreter == "" {
@@ -55,11 +57,22 @@ func Run(c Case) (Outcome, error) {
 	if strings.TrimSpace(c.Marker) == "" {
 		return outcome, fmt.Errorf("case %s has an empty marker; refusing to fabricate a reproduction", c.ID)
 	}
-	if _, err := os.Stat(c.ScriptPath); err != nil {
-		return outcome, fmt.Errorf("script not found: %w", err)
+
+	scriptPath, err := regularFile(c.ScriptPath)
+	if err != nil {
+		return outcome, fmt.Errorf("script: %w", err)
 	}
-	if _, err := os.Stat(c.SnapshotDir); err != nil {
-		return outcome, fmt.Errorf("snapshot dir not found: %w", err)
+	snapshotDir, err := existingDir(c.SnapshotDir)
+	if err != nil {
+		return outcome, fmt.Errorf("snapshot dir: %w", err)
+	}
+	interpreter := c.Interpreter
+	if strings.ContainsRune(interpreter, os.PathSeparator) {
+		abs, err := filepath.Abs(interpreter)
+		if err != nil {
+			return outcome, fmt.Errorf("interpreter: %w", err)
+		}
+		interpreter = abs
 	}
 
 	timeout := c.Timeout
@@ -75,11 +88,11 @@ func Run(c Case) (Outcome, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, c.Interpreter, c.ScriptPath)
+	cmd := exec.CommandContext(ctx, interpreter, scriptPath)
 	cmd.Dir = workdir
-	cmd.Env = append(os.Environ(), "VRH_SNAPSHOT="+c.SnapshotDir)
-	if err := denyNetwork(cmd); err != nil {
-		return outcome, fmt.Errorf("network namespace: %w", err)
+	cmd.Env = reproEnv(workdir, snapshotDir)
+	if err := isolateCommand(cmd); err != nil {
+		return outcome, fmt.Errorf("sandbox: %w", err)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -104,13 +117,53 @@ func Run(c Case) (Outcome, error) {
 	} else if runErr != nil {
 		return outcome, fmt.Errorf("run script: %w", runErr)
 	}
-
 	outcome.ExitCode = exitCode
-	outcome.Vulnerable = bytes.Contains([]byte(output), []byte(c.Marker))
-	if !outcome.Vulnerable {
-		outcome.Error = "marker not observed in output; finding did not reproduce"
+
+	if exitCode != 0 {
+		outcome.Vulnerable = false
+		outcome.Error = fmt.Sprintf("script exited %d; refusing to treat marker as evidence", exitCode)
+		return outcome, nil
 	}
+	if !bytes.Contains(stdout.Bytes(), []byte(c.Marker)) {
+		outcome.Vulnerable = false
+		outcome.Error = "marker not observed on stdout; finding did not reproduce"
+		return outcome, nil
+	}
+	outcome.Vulnerable = true
 	return outcome, nil
+}
+
+func regularFile(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", path)
+	}
+	return filepath.Abs(path)
+}
+
+func existingDir(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", path)
+	}
+	return filepath.Abs(path)
+}
+
+func reproEnv(workdir, snapshotDir string) []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + workdir,
+		"TMPDIR=" + workdir,
+		"VRH_SNAPSHOT=" + snapshotDir,
+		"LANG=C",
+		"LC_ALL=C",
+	}
 }
 
 // Export writes outcomes as JSON for the evidence ledger.

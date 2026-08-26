@@ -144,11 +144,15 @@ func TestExtractRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dest := t.TempDir()
+	dest := filepath.Join(t.TempDir(), "snap")
+	if err := os.MkdirAll(dest, 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := m.Extract(filepath.Join(out, "source.tar.gz"), dest); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Verify(dest); err != nil {
 		t.Fatalf("extracted tree failed verify: %v", err)
 	}
+	t.Cleanup(func() { _ = RemoveReadOnly(dest) })
 }

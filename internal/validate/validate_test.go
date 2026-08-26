@@ -60,6 +60,12 @@ func TestParseAttemptsRequiresBrokeIt(t *testing.T) {
 	}
 }
 
+func TestParseAttemptsRejectsUnknownFields(t *testing.T) {
+	if _, err := ParseAttempts([]byte(`[{"name":"check","hypothesis":"h","result":"r","broke_it":false,"extra":true}]`)); err == nil {
+		t.Fatal("unknown attempt field accepted")
+	}
+}
+
 func TestSeverityNoteSurvivesExport(t *testing.T) {
 	b := NewBuilder("F4")
 	b.Attempt("check", "h", "r", false).SeverityNote("not RCE; exposure only")

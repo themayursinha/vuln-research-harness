@@ -99,7 +99,7 @@ func TestRunReproIsolatesSnapshotMutations(t *testing.T) {
 	campaignDir, sourceDir := setupCampaign(t)
 	dir := t.TempDir()
 	mutate := filepath.Join(dir, "mutate.py")
-	if err := os.WriteFile(mutate, []byte("import os\nopen(os.path.join(os.environ['VRH_SNAPSHOT'], 'mutated.txt'), 'w').write('x')\nprint('LEAKMARKER')\n"), 0700); err != nil {
+	if err := os.WriteFile(mutate, []byte("import os\ntry:\n    open(os.path.join(os.environ['VRH_SNAPSHOT'], 'mutated.txt'), 'w').write('x')\nexcept OSError:\n    pass\nprint('LEAKMARKER')\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	check := filepath.Join(dir, "check.py")
@@ -117,5 +117,21 @@ func TestRunReproIsolatesSnapshotMutations(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(sourceDir, "mutated.txt")); !os.IsNotExist(err) {
 		t.Fatal("reproduction mutated the pinned source tree")
+	}
+}
+
+func TestRunReproResolvesScriptRelativeToCasesFile(t *testing.T) {
+	campaignDir, _ := setupCampaign(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "check.py"), []byte("print('LEAKMARKER')\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	casesPath := filepath.Join(dir, "cases.yaml")
+	content := "- id: f1\n  finding: test\n  script_path: check.py\n  interpreter: python3\n  marker: LEAKMARKER\n"
+	if err := os.WriteFile(casesPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRepro([]string{casesPath, campaignDir}, func() error { return nil }); err != nil {
+		t.Fatal(err)
 	}
 }

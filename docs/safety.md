@@ -21,10 +21,11 @@ The current code does not execute agents, create containers, or enforce
 filesystem limits. Those are future integrations and must not be implied by
 a valid contract. A valid contract is an admission check, not a sandbox.
 
-`vrh repro` executes each case against a fresh extract of the pinned archive
-and places the script in a new network namespace. Host-level probes remain a
-fail-closed preflight; they are not a substitute for a container or microVM
-adapter. `vrh verify-sandbox` runs those probes.
+`vrh repro` executes each case against a fresh **read-only** extract of the
+pinned archive, with a stripped environment, in a new network namespace and
+process group. The marker counts only on a successful (exit 0) stdout hit.
+Host-level probes remain a fail-closed preflight; they are not a substitute
+for a container or microVM adapter. `vrh verify-sandbox` runs those probes.
 
 ## Responsible disclosure
 

@@ -7,6 +7,6 @@ import (
 	"os/exec"
 )
 
-func denyNetwork(cmd *exec.Cmd) error {
+func isolateCommand(cmd *exec.Cmd) error {
 	return fmt.Errorf("network-denied reproduction requires Linux")
 }
