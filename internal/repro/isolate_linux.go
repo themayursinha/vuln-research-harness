@@ -119,12 +119,12 @@ func bringLoopbackUp() {
 		_     [14]byte
 	}
 	copy(ifr.name[:], "lo")
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.SIOCGIFFLAGS, uintptr(unsafe.Pointer(&ifr)))
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.SIOCGIFFLAGS, uintptr(unsafe.Pointer(&ifr))) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	if errno != 0 {
 		return
 	}
 	ifr.flags |= syscall.IFF_UP | syscall.IFF_RUNNING
-	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.SIOCSIFFLAGS, uintptr(unsafe.Pointer(&ifr)))
+	_, _, _ = syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.SIOCSIFFLAGS, uintptr(unsafe.Pointer(&ifr))) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 }
 
 func restrictFS(scratch string) error {
@@ -136,7 +136,7 @@ func restrictFS(scratch string) error {
 	readExec := (landlockFSExecute | landlockFSReadFile | landlockFSReadDir) & handled
 
 	attr := handled
-	rs, _, errno := syscall.Syscall(sysLandlockCreateRuleset, uintptr(unsafe.Pointer(&attr)), unsafe.Sizeof(attr), 0)
+	rs, _, errno := syscall.Syscall(sysLandlockCreateRuleset, uintptr(unsafe.Pointer(&attr)), unsafe.Sizeof(attr), 0) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	if errno != 0 {
 		return fmt.Errorf("landlock ruleset: %w", errno)
 	}
@@ -180,9 +180,9 @@ func landlockAllow(rs int, path string, access, handled uint64) error {
 	}
 	defer syscall.Close(fd)
 	var buf [12]byte
-	*(*uint64)(unsafe.Pointer(&buf[0])) = access & handled
-	*(*int32)(unsafe.Pointer(&buf[8])) = int32(fd)
-	_, _, errno := syscall.Syscall6(sysLandlockAddRule, uintptr(rs), landlockRulePathBeneath, uintptr(unsafe.Pointer(&buf[0])), 0, 0, 0)
+	*(*uint64)(unsafe.Pointer(&buf[0])) = access & handled // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
+	*(*int32)(unsafe.Pointer(&buf[8])) = int32(fd)         // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
+	_, _, errno := syscall.Syscall6(sysLandlockAddRule, uintptr(rs), landlockRulePathBeneath, uintptr(unsafe.Pointer(&buf[0])), 0, 0, 0) // nosemgrep: go.lang.security.audit.unsafe.use-of-unsafe-block
 	if errno != 0 {
 		return fmt.Errorf("landlock rule %s: %w", path, errno)
 	}
