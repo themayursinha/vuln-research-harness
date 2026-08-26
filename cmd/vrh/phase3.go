@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/themayursinha/vuln-research-harness/internal/contract"
 	"github.com/themayursinha/vuln-research-harness/internal/manifest"
@@ -18,12 +19,13 @@ import (
 
 // reproCaseFile is the on-disk form of one reproduction case.
 type reproCaseFile struct {
-	ID          string `yaml:"id"`
-	Finding     string `yaml:"finding"`
-	ScriptPath  string `yaml:"script_path"`
-	Interpreter string `yaml:"interpreter"`
-	VenvPython  string `yaml:"venv_python,omitempty"` // optional: use this interpreter instead
-	Marker      string `yaml:"marker"`
+	ID             string `yaml:"id"`
+	Finding        string `yaml:"finding"`
+	ScriptPath     string `yaml:"script_path"`
+	Interpreter    string `yaml:"interpreter"`
+	VenvPython     string `yaml:"venv_python,omitempty"` // optional: use this interpreter instead
+	Marker         string `yaml:"marker"`
+	TimeoutSeconds int    `yaml:"timeout_seconds,omitempty"`
 }
 
 func reproCmd(args []string) error {
@@ -74,6 +76,11 @@ func runRepro(args []string, isolate func() error) error {
 			_ = manifest.RemoveReadOnly(snapDir)
 			return err
 		}
+		timeout, err := caseTimeout(c)
+		if err != nil {
+			_ = manifest.RemoveReadOnly(snapDir)
+			return err
+		}
 		outcome, err := repro.Run(repro.Case{
 			ID:          c.ID,
 			Finding:     c.Finding,
@@ -81,6 +88,7 @@ func runRepro(args []string, isolate func() error) error {
 			Interpreter: resolveInterpreter(casesDir, c),
 			Marker:      c.Marker,
 			SnapshotDir: snapDir,
+			Timeout:     timeout,
 		})
 		_ = manifest.RemoveReadOnly(snapDir)
 		if err != nil {
@@ -187,4 +195,18 @@ func resolvePath(base, p string) string {
 		return p
 	}
 	return filepath.Join(base, p)
+}
+
+func caseTimeout(c reproCaseFile) (time.Duration, error) {
+	if c.TimeoutSeconds < 0 {
+		return 0, fmt.Errorf("case %s: timeout_seconds must be >= 0", c.ID)
+	}
+	if c.TimeoutSeconds == 0 {
+		return 0, nil
+	}
+	d := time.Duration(c.TimeoutSeconds) * time.Second
+	if d > repro.MaxTimeout {
+		return 0, fmt.Errorf("case %s: timeout_seconds exceeds %s", c.ID, repro.MaxTimeout)
+	}
+	return d, nil
 }

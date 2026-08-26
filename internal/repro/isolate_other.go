@@ -3,10 +3,11 @@
 package repro
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 )
 
-func isolateCommand(cmd *exec.Cmd) error {
-	return fmt.Errorf("network-denied reproduction requires Linux")
+func startIsolatedCommand(ctx context.Context, interpreter, script string) (*exec.Cmd, error) {
+	return nil, fmt.Errorf("network-denied reproduction requires Linux")
 }

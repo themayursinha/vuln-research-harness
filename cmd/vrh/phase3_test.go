@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/themayursinha/vuln-research-harness/internal/contract"
 	"github.com/themayursinha/vuln-research-harness/internal/manifest"
@@ -133,5 +134,25 @@ func TestRunReproResolvesScriptRelativeToCasesFile(t *testing.T) {
 	}
 	if err := runRepro([]string{casesPath, campaignDir}, func() error { return nil }); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunReproHonorsTimeoutSeconds(t *testing.T) {
+	campaignDir, _ := setupCampaign(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "slow.py"), []byte("import time\ntime.sleep(30)\nprint('LEAKMARKER')\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	casesPath := filepath.Join(dir, "cases.yaml")
+	content := "- id: f1\n  finding: test\n  script_path: slow.py\n  interpreter: python3\n  marker: LEAKMARKER\n  timeout_seconds: 1\n"
+	if err := os.WriteFile(casesPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := runRepro([]string{casesPath, campaignDir}, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Fatalf("timeout_seconds was ignored, ran %s", time.Since(start))
 	}
 }

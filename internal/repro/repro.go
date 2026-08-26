@@ -5,7 +5,6 @@
 package repro
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -18,9 +17,14 @@ import (
 	"time"
 )
 
-// DefaultTimeout bounds one reproduction script so a deadlock cannot stall
-// the rest of the campaign.
-const DefaultTimeout = 60 * time.Second
+const (
+	// DefaultTimeout bounds one reproduction script so a deadlock cannot stall
+	// the rest of the campaign.
+	DefaultTimeout = 60 * time.Second
+	// MaxTimeout is the longest a cases.yaml entry may request.
+	MaxTimeout      = 10 * time.Minute
+	sandboxFailExit = 125
+)
 
 // Case is one reproduction: a script run against the snapshot source with a
 // synthetic marker that must appear in its output if the vulnerability holds.
@@ -37,6 +41,7 @@ type Case struct {
 // Outcome records one executed case.
 type Outcome struct {
 	CaseID       string `json:"case_id"`
+	Finding      string `json:"finding"`
 	Vulnerable   bool   `json:"vulnerable"`
 	ExitCode     int    `json:"exit_code"`
 	DurationMs   int64  `json:"duration_ms"`
@@ -46,13 +51,17 @@ type Outcome struct {
 
 // Run executes the case in a clean temp working directory. The script sees
 // the snapshot path via VRH_SNAPSHOT, inherits a stripped environment, and
-// is placed in a new network namespace. A case is vulnerable only when the
-// interpreter exits 0 and the marker appears on stdout — a crash or syntax
-// error that echoes the marker is not evidence.
+// is placed in a new user+network namespace. Landlock denies writes outside
+// a scratch dir (chmod on the extract is not a write barrier: the child is
+// uid 0 in the user namespace). A case is vulnerable only when the
+// interpreter exits 0 and the marker appears on stdout.
 func Run(c Case) (Outcome, error) {
-	outcome := Outcome{CaseID: c.ID}
+	outcome := Outcome{CaseID: c.ID, Finding: strings.TrimSpace(c.Finding)}
 	if c.ID == "" || c.ScriptPath == "" || c.Interpreter == "" {
 		return outcome, fmt.Errorf("case needs id, script_path and interpreter")
+	}
+	if strings.TrimSpace(c.Finding) == "" {
+		return outcome, fmt.Errorf("case %s has an empty finding; refusing to export unattributed evidence", c.ID)
 	}
 	if strings.TrimSpace(c.Marker) == "" {
 		return outcome, fmt.Errorf("case %s has an empty marker; refusing to fabricate a reproduction", c.ID)
@@ -76,8 +85,14 @@ func Run(c Case) (Outcome, error) {
 	}
 
 	timeout := c.Timeout
-	if timeout <= 0 {
+	if timeout < 0 {
+		return outcome, fmt.Errorf("case %s: timeout must be positive", c.ID)
+	}
+	if timeout == 0 {
 		timeout = DefaultTimeout
+	}
+	if timeout > MaxTimeout {
+		return outcome, fmt.Errorf("case %s: timeout exceeds %s", c.ID, MaxTimeout)
 	}
 
 	workdir, err := os.MkdirTemp("", "vrh-repro-")
@@ -85,25 +100,34 @@ func Run(c Case) (Outcome, error) {
 		return outcome, fmt.Errorf("create workdir: %w", err)
 	}
 	defer os.RemoveAll(workdir)
+	scratch := filepath.Join(workdir, "scratch")
+	if err := os.Mkdir(scratch, 0700); err != nil {
+		return outcome, fmt.Errorf("create scratch: %w", err)
+	}
+	if isInside(scratch, snapshotDir) {
+		return outcome, fmt.Errorf("snapshot dir %s is inside the writable scratch area", snapshotDir)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, interpreter, scriptPath)
-	cmd.Dir = workdir
-	cmd.Env = reproEnv(workdir, snapshotDir)
-	if err := isolateCommand(cmd); err != nil {
+	cmd, err := startIsolatedCommand(ctx, interpreter, scriptPath)
+	if err != nil {
 		return outcome, fmt.Errorf("sandbox: %w", err)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Dir = scratch
+	cmd.Env = reproEnv(scratch, snapshotDir)
+	stdout := newCapture(c.Marker)
+	stderr := newCapture("")
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	start := time.Now()
 	runErr := cmd.Run()
 	outcome.DurationMs = time.Since(start).Milliseconds()
-	output := stdout.String() + stderr.String()
-	sum := sha256.Sum256([]byte(output))
-	outcome.OutputDigest = hex.EncodeToString(sum[:])
+	sum := sha256.New()
+	_, _ = sum.Write(stdout.sum())
+	_, _ = sum.Write(stderr.sum())
+	outcome.OutputDigest = hex.EncodeToString(sum.Sum(nil))
 
 	if ctx.Err() == context.DeadlineExceeded {
 		outcome.Vulnerable = false
@@ -119,12 +143,19 @@ func Run(c Case) (Outcome, error) {
 	}
 	outcome.ExitCode = exitCode
 
+	if exitCode == sandboxFailExit {
+		msg := strings.TrimSpace(stderr.kept.String())
+		if msg == "" {
+			msg = "sandbox setup failed"
+		}
+		return outcome, fmt.Errorf("%s", msg)
+	}
 	if exitCode != 0 {
 		outcome.Vulnerable = false
 		outcome.Error = fmt.Sprintf("script exited %d; refusing to treat marker as evidence", exitCode)
 		return outcome, nil
 	}
-	if !bytes.Contains(stdout.Bytes(), []byte(c.Marker)) {
+	if !stdout.found {
 		outcome.Vulnerable = false
 		outcome.Error = "marker not observed on stdout; finding did not reproduce"
 		return outcome, nil
@@ -155,15 +186,24 @@ func existingDir(path string) (string, error) {
 	return filepath.Abs(path)
 }
 
-func reproEnv(workdir, snapshotDir string) []string {
+func reproEnv(scratch, snapshotDir string) []string {
 	return []string{
 		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + workdir,
-		"TMPDIR=" + workdir,
+		"HOME=" + scratch,
+		"TMPDIR=" + scratch,
 		"VRH_SNAPSHOT=" + snapshotDir,
+		"VRH_SCRATCH=" + scratch,
+		"PYTHONDONTWRITEBYTECODE=1",
 		"LANG=C",
 		"LC_ALL=C",
 	}
+}
+
+func isInside(parent, child string) bool {
+	parent = filepath.Clean(parent)
+	child = filepath.Clean(child)
+	sep := string(os.PathSeparator)
+	return child == parent || strings.HasPrefix(child, parent+sep)
 }
 
 // Export writes outcomes as JSON for the evidence ledger.

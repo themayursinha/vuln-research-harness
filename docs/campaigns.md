@@ -45,7 +45,8 @@ the manifest digest, and the source tree must still verify against the
 manifest — including a check that no file was added or removed since the
 snapshot. A directory with families but no valid authorized contract never
 dispatches work. `vrh repro` additionally extracts a fresh copy of the pinned
-archive for each case, runs the script in a new network namespace, and
+archive for each case, runs the script in a new user+network namespace
+with Landlock write confinement and a per-case `timeout_seconds`, and
 refuses to execute unless live DNS and TCP probes prove host isolation.
 
 The append-only ledger is the **single source of truth**; `registry.json`
