@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt check clean
+.PHONY: build test vet fmt check clean fixture-image
 
 GO ?= go
 
@@ -17,11 +17,19 @@ fmt:
 check: vet test build
 
 FIXTURE_IMAGE ?= localhost/vrh-fixture-lab:latest
+# Same preference order as container.Detect (podman, then docker). Override with
+# CONTAINER_RUNTIME=docker|podman when both are installed and you need a specific one.
+CONTAINER_RUNTIME ?= $(shell \
+	if command -v podman >/dev/null 2>&1; then echo podman; \
+	elif command -v docker >/dev/null 2>&1; then echo docker; \
+	else echo ""; fi)
 
 fixture-image:
-	docker build -t $(FIXTURE_IMAGE) campaigns/fixture-lab
-	@echo "container_image for campaign.yaml:"
-	@docker image inspect $(FIXTURE_IMAGE) --format '{{index .RepoDigests 0}}' 2>/dev/null || docker image inspect $(FIXTURE_IMAGE) --format '{{.Id}}'
+	@test -n "$(CONTAINER_RUNTIME)" || (echo "no container runtime (podman or docker)" >&2; exit 1)
+	$(CONTAINER_RUNTIME) build -t $(FIXTURE_IMAGE) campaigns/fixture-lab
+	@echo "built with $(CONTAINER_RUNTIME); container_image for campaign.yaml:"
+	@$(CONTAINER_RUNTIME) image inspect $(FIXTURE_IMAGE) --format '{{index .RepoDigests 0}}' 2>/dev/null \
+		|| $(CONTAINER_RUNTIME) image inspect $(FIXTURE_IMAGE) --format '{{.Id}}'
 
 clean:
 	rm -rf vrh

@@ -28,9 +28,10 @@ cd campaigns/fixture-lab
 ../../vrh campaign status .
 ```
 
-`make fixture-image` builds the digest-pinned local image. The committed
-`campaign.yaml` already records the digest produced at fixture creation time;
-rebuild and update it if you change the Dockerfile.
+`make fixture-image` builds into the same runtime VRH prefers (`podman`, then
+`docker`). Override with `CONTAINER_RUNTIME=docker` or `podman` if both are
+installed. The committed `campaign.yaml` already records the digest from
+fixture creation; rebuild and update it if you change the Dockerfile.
 
 ## What it models
 

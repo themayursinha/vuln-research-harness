@@ -10,6 +10,22 @@ dist/
 campaigns/*/
 !campaigns/example/
 !campaigns/fixture-lab/
+# Re-ignore fixture contents; whitelist only public committed assets.
+campaigns/fixture-lab/**
+!campaigns/fixture-lab/.gitignore
+!campaigns/fixture-lab/README.md
+!campaigns/fixture-lab/Dockerfile
+!campaigns/fixture-lab/campaign.yaml
+!campaigns/fixture-lab/cases.yaml
+!campaigns/fixture-lab/manifest.json
+!campaigns/fixture-lab/source.tar.gz
+!campaigns/fixture-lab/scripts/
+!campaigns/fixture-lab/scripts/repro.py
+!campaigns/fixture-lab/source/
+!campaigns/fixture-lab/source/app.py
+!campaigns/fixture-lab/source/secret.txt
+!campaigns/fixture-lab/source/public/
+!campaigns/fixture-lab/source/public/config.txt
 
 # Editor
 *.swp
