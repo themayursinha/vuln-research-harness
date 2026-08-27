@@ -35,6 +35,8 @@ type FileDigest struct {
 	Size   int64  `json:"size"`
 }
 
+const maxSnapshotFileBytes int64 = 256 << 20
+
 // Snapshot walks sourceDir deterministically and writes a manifest plus a
 // normalized tar.gz archive into outDir. The archive digest is the
 // source_snapshot value for the campaign contract.
@@ -117,6 +119,13 @@ func walkRegularFiles(sourceDir string) ([]string, error) {
 		rel, err := filepath.Rel(sourceDir, path)
 		if err != nil {
 			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", rel, err)
+		}
+		if info.Size() > maxSnapshotFileBytes {
+			return fmt.Errorf("refusing to snapshot %s: size %d exceeds %d-byte limit", rel, info.Size(), maxSnapshotFileBytes)
 		}
 		rels = append(rels, filepath.ToSlash(rel))
 		return nil
@@ -281,7 +290,10 @@ func (m Manifest) Extract(archivePath, dest string) error {
 		if err != nil {
 			return fmt.Errorf("extract %s: %w", rel, err)
 		}
-		if _, err := io.Copy(file, tr); err != nil {
+		if hdr.Size < 0 || hdr.Size > maxSnapshotFileBytes {
+			return fmt.Errorf("extract %s: size %d exceeds %d-byte limit", rel, hdr.Size, maxSnapshotFileBytes)
+		}
+		if _, err := io.CopyN(file, tr, hdr.Size); err != nil {
 			file.Close()
 			return fmt.Errorf("extract %s: %w", rel, err)
 		}

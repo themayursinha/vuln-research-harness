@@ -42,11 +42,12 @@ type Attacker struct {
 }
 
 type Environment struct {
-	Deployment    string `yaml:"deployment"`
-	Network       string `yaml:"network"`
-	Isolation     string `yaml:"isolation"`
-	SyntheticData bool   `yaml:"synthetic_data"`
-	Disposable    bool   `yaml:"disposable"`
+	Deployment     string `yaml:"deployment"`
+	Network        string `yaml:"network"`
+	Isolation      string `yaml:"isolation"`
+	ContainerImage string `yaml:"container_image"`
+	SyntheticData  bool   `yaml:"synthetic_data"`
+	Disposable     bool   `yaml:"disposable"`
 }
 
 type Success struct {
@@ -94,6 +95,7 @@ func (c Campaign) Validate() error {
 	require(strings.TrimSpace(c.Environment.Deployment) != "", "environment.deployment", "is required")
 	require(c.Environment.Network == "denied" || c.Environment.Network == "allowlisted", "environment.network", "must be denied or allowlisted")
 	require(strings.TrimSpace(c.Environment.Isolation) != "", "environment.isolation", "is required")
+	require(pinnedContainerImage(c.Environment.ContainerImage), "environment.container_image", "must be a digest-pinned local image (name@sha256:... or sha256:...)")
 	require(c.Environment.SyntheticData, "environment.synthetic_data", "must be true")
 	require(c.Environment.Disposable, "environment.disposable", "must be true")
 	require(strings.TrimSpace(c.Success.Impact) != "", "success.impact", "is required")
@@ -106,6 +108,34 @@ func (c Campaign) Validate() error {
 		return errors.New("invalid campaign contract:\n- " + strings.Join(problems, "\n- "))
 	}
 	return nil
+}
+
+func pinnedContainerImage(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.ContainsAny(ref, " \t\n\r") {
+		return false
+	}
+	digest := ""
+	switch {
+	case strings.HasPrefix(ref, "sha256:"):
+		digest = strings.TrimPrefix(ref, "sha256:")
+	default:
+		_, d, ok := strings.Cut(ref, "@sha256:")
+		if !ok {
+			return false
+		}
+		digest = d
+	}
+	if len(digest) != 64 {
+		return false
+	}
+	for i := 0; i < len(digest); i++ {
+		c := digest[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func Template(name string) Campaign {
@@ -129,11 +159,12 @@ func Template(name string) Campaign {
 			Excluded:          []string{"real credentials", "real user data", "external network"},
 		},
 		Environment: Environment{
-			Deployment:    "disposable local container",
-			Network:       "denied",
-			Isolation:     "rootless container with read-only source mount",
-			SyntheticData: true,
-			Disposable:    true,
+			Deployment:     "disposable local container",
+			Network:        "denied",
+			Isolation:      "rootless container with read-only source mount",
+			ContainerImage: "localhost/vrh-repro@sha256:" + strings.Repeat("0", 64),
+			SyntheticData:  true,
+			Disposable:     true,
 		},
 		Success: Success{
 			Impact:   "replace-with-concrete-impact",

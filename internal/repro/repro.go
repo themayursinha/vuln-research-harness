@@ -49,14 +49,49 @@ type Outcome struct {
 	Error        string `json:"error,omitempty"`
 }
 
-// Run executes the case in a clean temp working directory. The script sees
-// the snapshot path via VRH_SNAPSHOT, inherits a stripped environment, and
-// is placed in a new user+network namespace. Landlock denies writes outside
-// a scratch dir (chmod on the extract is not a write barrier: the child is
-// uid 0 in the user namespace). A case is vulnerable only when the
-// interpreter exits 0 and the marker appears on stdout.
+// StartRequest is the host-side inputs for one sandboxed invocation.
+type StartRequest struct {
+	Interpreter string
+	Script      string
+	Scratch     string
+	Snapshot    string
+}
+
+// Invocation is one sandboxed process. AfterStop, if set, must prove the
+// execution environment is gone; a timeout is not a safe non-reproduction
+// while a research container may still be running.
+type Invocation struct {
+	Cmd       *exec.Cmd
+	AfterStop func() error
+}
+
+// Starter launches the interpreter against the script. Process-local tests
+// use namespaces; vrh repro uses the container adapter.
+type Starter func(ctx context.Context, req StartRequest) (*Invocation, error)
+
+// Run executes the case in a clean temp working directory using the
+// process-local user+network namespace and Landlock write confinement.
 func Run(c Case) (Outcome, error) {
+	return RunWith(c, processLocalStart)
+}
+
+func processLocalStart(ctx context.Context, req StartRequest) (*Invocation, error) {
+	cmd, err := startIsolatedCommand(ctx, req.Interpreter, req.Script)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Dir = req.Scratch
+	cmd.Env = reproEnv(req.Scratch, req.Snapshot)
+	return &Invocation{Cmd: cmd}, nil
+}
+
+// RunWith executes the case using start. A case is vulnerable only when the
+// interpreter exits 0 and the marker appears on stdout.
+func RunWith(c Case, start Starter) (Outcome, error) {
 	outcome := Outcome{CaseID: c.ID, Finding: strings.TrimSpace(c.Finding)}
+	if start == nil {
+		return outcome, fmt.Errorf("sandbox starter is required")
+	}
 	if c.ID == "" || c.ScriptPath == "" || c.Interpreter == "" {
 		return outcome, fmt.Errorf("case needs id, script_path and interpreter")
 	}
@@ -110,20 +145,32 @@ func Run(c Case) (Outcome, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd, err := startIsolatedCommand(ctx, interpreter, scriptPath)
+	inv, err := start(ctx, StartRequest{
+		Interpreter: interpreter,
+		Script:      scriptPath,
+		Scratch:     scratch,
+		Snapshot:    snapshotDir,
+	})
 	if err != nil {
 		return outcome, fmt.Errorf("sandbox: %w", err)
 	}
-	cmd.Dir = scratch
-	cmd.Env = reproEnv(scratch, snapshotDir)
+	if inv == nil || inv.Cmd == nil {
+		return outcome, fmt.Errorf("sandbox starter returned no command")
+	}
+	cmd := inv.Cmd
 	stdout := newCapture(c.Marker)
 	stderr := newCapture("")
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	start := time.Now()
+	startAt := time.Now()
 	runErr := cmd.Run()
-	outcome.DurationMs = time.Since(start).Milliseconds()
+	if inv.AfterStop != nil {
+		if stopErr := inv.AfterStop(); stopErr != nil {
+			return outcome, fmt.Errorf("container cleanup unproven: %w", stopErr)
+		}
+	}
+	outcome.DurationMs = time.Since(startAt).Milliseconds()
 	sum := sha256.New()
 	_, _ = sum.Write(stdout.sum())
 	_, _ = sum.Write(stderr.sum())

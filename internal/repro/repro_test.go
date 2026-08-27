@@ -1,8 +1,12 @@
 package repro
 
 import (
+	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -89,6 +93,29 @@ func TestRunTimesOutHungScript(t *testing.T) {
 	}
 	if outcome.Error == "" {
 		t.Fatal("timeout should record an error")
+	}
+}
+
+func TestRunWithReportsCleanupFailureOnTimeout(t *testing.T) {
+	dir := t.TempDir()
+	script := writeScript(t, dir, "hang-clean", "python3", "import time\ntime.sleep(30)\nprint(\"LEAKMARKER\")\n")
+	_, err := RunWith(Case{
+		ID: "f-hang-clean", Finding: "test", ScriptPath: script, Interpreter: "python3",
+		Marker: "LEAKMARKER", SnapshotDir: t.TempDir(), Timeout: 200 * time.Millisecond,
+	}, func(ctx context.Context, req StartRequest) (*Invocation, error) {
+		cmd := exec.CommandContext(ctx, "sleep", "30")
+		return &Invocation{
+			Cmd: cmd,
+			AfterStop: func() error {
+				return errors.New("container still present after rm")
+			},
+		}, nil
+	})
+	if err == nil {
+		t.Fatal("cleanup failure after timeout treated as a non-reproduction")
+	}
+	if !strings.Contains(err.Error(), "cleanup unproven") {
+		t.Fatalf("got %v, want cleanup unproven", err)
 	}
 }
 

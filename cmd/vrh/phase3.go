@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/themayursinha/vuln-research-harness/internal/container"
 	"github.com/themayursinha/vuln-research-harness/internal/contract"
 	"github.com/themayursinha/vuln-research-harness/internal/manifest"
 	"github.com/themayursinha/vuln-research-harness/internal/repro"
-	"github.com/themayursinha/vuln-research-harness/internal/sandbox"
 	"github.com/themayursinha/vuln-research-harness/internal/validate"
 	"gopkg.in/yaml.v3"
 )
@@ -29,7 +30,7 @@ type reproCaseFile struct {
 }
 
 func reproCmd(args []string) error {
-	return runRepro(args, requireNetworkIsolation)
+	return runRepro(args, nil)
 }
 
 func runRepro(args []string, isolate func() error) error {
@@ -52,9 +53,6 @@ func runRepro(args []string, isolate func() error) error {
 	if err := requireAdmission(campaignDir); err != nil {
 		return err
 	}
-	if err := isolate(); err != nil {
-		return err
-	}
 	campaign, err := contract.Load(campaignFiles(campaignDir)["contract"])
 	if err != nil {
 		return fmt.Errorf("load campaign: %w", err)
@@ -63,6 +61,37 @@ func runRepro(args []string, isolate func() error) error {
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
+
+	runCase := repro.Run
+	if isolate != nil {
+		if err := isolate(); err != nil {
+			return err
+		}
+	} else {
+		for _, c := range cases {
+			if c.VenvPython != "" {
+				return fmt.Errorf("case %s: venv_python is a host path and cannot run inside the pinned container image", c.ID)
+			}
+			if strings.ContainsRune(c.Interpreter, os.PathSeparator) && !filepath.IsAbs(c.Interpreter) {
+				return fmt.Errorf("case %s: interpreter must be an in-image name or absolute in-image path", c.ID)
+			}
+		}
+		rt, err := requireContainerRuntime(campaign.Environment.ContainerImage)
+		if err != nil {
+			return err
+		}
+		runCase = func(c repro.Case) (repro.Outcome, error) {
+			image := campaign.Environment.ContainerImage
+			return repro.RunWith(c, func(ctx context.Context, req repro.StartRequest) (*repro.Invocation, error) {
+				cmd, after, err := rt.CaseCommand(ctx, image, req.Interpreter, req.Script, req.Snapshot, req.Scratch)
+				if err != nil {
+					return nil, err
+				}
+				return &repro.Invocation{Cmd: cmd, AfterStop: after}, nil
+			})
+		}
+	}
+
 	archivePath := filepath.Join(campaignDir, "source.tar.gz")
 	casesDir := filepath.Dir(casesPath)
 
@@ -81,7 +110,7 @@ func runRepro(args []string, isolate func() error) error {
 			_ = manifest.RemoveReadOnly(snapDir)
 			return err
 		}
-		outcome, err := repro.Run(repro.Case{
+		outcome, err := runCase(repro.Case{
 			ID:          c.ID,
 			Finding:     c.Finding,
 			ScriptPath:  resolvePath(casesDir, c.ScriptPath),
@@ -113,31 +142,38 @@ func runRepro(args []string, isolate func() error) error {
 	return nil
 }
 
-func requireNetworkIsolation() error {
-	v, err := sandbox.VerifyNetwork(sandbox.DefaultNetworkProbes())
+func requireContainerRuntime(image string) (container.Runtime, error) {
+	rt, err := container.Detect()
 	if err != nil {
-		return fmt.Errorf("sandbox: %w", err)
+		return container.Runtime{}, fmt.Errorf("refusing to run reproductions: %w", err)
 	}
-	if !v.Passed {
-		return fmt.Errorf("refusing to run reproductions: network isolation not verified: %s", strings.Join(v.Problems, "; "))
+	if err := rt.VerifyIsolation(image); err != nil {
+		return container.Runtime{}, fmt.Errorf("refusing to run reproductions: %w", err)
 	}
-	return nil
+	return rt, nil
 }
 
 func verifySandboxCmd(args []string) error {
-	if len(args) != 0 {
-		return errors.New("verify-sandbox takes no arguments; probes run in the current environment")
+	if len(args) != 1 {
+		return errors.New("verify-sandbox requires <campaign-dir>")
 	}
-	v, err := sandbox.VerifyNetwork(sandbox.DefaultNetworkProbes())
+	campaign, err := contract.Load(campaignFiles(args[0])["contract"])
+	if err != nil {
+		return fmt.Errorf("load campaign: %w", err)
+	}
+	if err := campaign.Validate(); err != nil {
+		return err
+	}
+	rt, err := container.Detect()
 	if err != nil {
 		return err
 	}
-	data, _ := json.MarshalIndent(v, "", "  ")
-	fmt.Println(string(data))
-	if !v.Passed {
-		return fmt.Errorf("network boundary NOT verified: %s", strings.Join(v.Problems, "; "))
+	if err := rt.VerifyIsolation(campaign.Environment.ContainerImage); err != nil {
+		return err
 	}
-	fmt.Println("network boundary verified: DNS and TCP both blocked")
+	fmt.Printf("container runtime: %s\n", rt.Kind)
+	fmt.Printf("image: %s\n", campaign.Environment.ContainerImage)
+	fmt.Println("container isolation verified: network=none, read-only rootfs, capabilities dropped, no published ports")
 	return nil
 }
 

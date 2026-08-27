@@ -156,3 +156,21 @@ func TestExtractRoundTrip(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = RemoveReadOnly(dest) })
 }
+
+func TestSnapshotRejectsOversizedFile(t *testing.T) {
+	src := t.TempDir()
+	huge := filepath.Join(src, "huge.bin")
+	f, err := os.Create(huge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(maxSnapshotFileBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Snapshot(src, t.TempDir()); err == nil {
+		t.Fatal("oversized file accepted into snapshot")
+	}
+}

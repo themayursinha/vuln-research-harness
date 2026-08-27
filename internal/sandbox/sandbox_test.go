@@ -90,13 +90,13 @@ func TestVerifyNetworkFailsWhenProbeTimesOut(t *testing.T) {
 	}
 }
 
-func TestVerifyNetworkFailsOnEmptyProbes(t *testing.T) {
-	v, err := VerifyNetwork(nil)
+func TestVerifyWithNilRunner(t *testing.T) {
+	v, err := VerifyWith(blockedProbes(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if v.Passed {
-		t.Fatal("empty probe set must not certify isolation")
+		t.Fatal("nil runner must not certify isolation")
 	}
 }
 
