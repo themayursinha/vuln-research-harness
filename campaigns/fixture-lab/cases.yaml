@@ -1,0 +1,6 @@
+- id: path-join-leak
+  finding: F-LAB-001
+  script_path: scripts/repro.py
+  interpreter: python3
+  marker: LAB-VULN-MARKER
+  timeout_seconds: 30

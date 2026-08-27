@@ -1,0 +1,36 @@
+version: v1
+name: fixture-lab
+target:
+  name: synthetic-path-join-lab
+  source_snapshot: sha256:7c701b08c96e0e8a038ddce41ac45b17b69c41a0c51e75db2af1b9b255bbf806
+  source_path: source
+authorization:
+  owner: local-lab-operator
+  scope: authorized synthetic local snapshot only
+  written_permission: true
+  evidence: public fixture in vuln-research-harness repository
+attacker:
+  starting_privilege: unauthenticated local protocol client
+  capabilities:
+    - supply relative paths to the lab reader
+  excluded:
+    - real credentials
+    - real user data
+    - external network
+environment:
+  deployment: disposable local container
+  network: denied
+  isolation: digest-pinned container with read-only snapshot mount
+  container_image: localhost/vrh-fixture-lab@sha256:099a22d9fb5ed88340727687c6e3bbae32ca8711043cab7ae7f8ee7f4242b5f1
+  synthetic_data: true
+  disposable: true
+success:
+  impact: read synthetic secret file via path traversal in lab join helper
+  evidence:
+    - reproduction test
+    - repro_outcomes.json
+    - source snapshot digest
+discovery:
+  source_first: true
+  history_restricted: true
+  internet_restricted: true

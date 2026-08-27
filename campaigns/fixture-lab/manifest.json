@@ -1,0 +1,23 @@
+{
+  "target": "source",
+  "created_at": "2026-08-27T17:59:21Z",
+  "archive_sha256": "7c701b08c96e0e8a038ddce41ac45b17b69c41a0c51e75db2af1b9b255bbf806",
+  "file_count": 3,
+  "files": [
+    {
+      "path": "app.py",
+      "sha256": "322398d585f9a8fd7755cf6600bd250ecd9e665755f8b6fcbe5344bb164292c0",
+      "size": 522
+    },
+    {
+      "path": "public/config.txt",
+      "sha256": "7ebf24f096077464830459678ec1e1819f057c963dfcde9ce39a61a0cda452a0",
+      "size": 20
+    },
+    {
+      "path": "secret.txt",
+      "sha256": "5b39a97fd73022c3129abefc5115802526d3df8cdfa08a94bc423ebe420dc6d1",
+      "size": 17
+    }
+  ]
+}
