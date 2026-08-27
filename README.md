@@ -10,12 +10,11 @@ pins the target and success condition, an approach registry that prevents
 premature agent convergence, and an evidence ledger that records every state
 transition from hypothesis to reproduced impact.
 
-**Status: foundation + controlled execution + validation lane.** The campaign
-contract, approach registry, evidence ledger, snapshot manifest, capability
-gate, manual inbox round loop, reproduction runner, container adapter
-(digest-pinned local image, `--network=none`, read-only snapshot mount),
-sandbox probes, and adversarial validator are implemented and tested. An
-automated agent runner and a microVM adapter are not built yet.
+**Status: Phase 4 pilot prep.** Phases 1–3 are complete: contract, registry,
+ledger, coordinator round loop, container-backed reproduction (`vrh repro`),
+sandbox verification, and adversarial validation. Next: close the evidence
+loop (ledger events, reference fixture), then run a bounded manual pilot.
+An automated agent runner and microVM adapter are not built yet.
 See [docs/roadmap.md](docs/roadmap.md) and [docs/campaigns.md](docs/campaigns.md).
 
 ## Why
