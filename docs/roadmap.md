@@ -1,6 +1,6 @@
 # Roadmap
 
-## Phase 1: foundation (current)
+## Phase 1: foundation
 
 - [x] Campaign contract and fail-closed validation
 - [x] Approach-family registry with blocked-path reopening rule
@@ -17,13 +17,14 @@
 
 ## Phase 3: validation
 
-- [x] Minimal reproduction runner (vrh repro)
+- [x] Minimal reproduction runner (`vrh repro`)
 - [x] Disposable container adapter (digest-pinned local image; process-local namespaces remain the unit-test fallback)
-- [x] Network boundary verification (vrh verify-sandbox; inspects created container HostConfig)
-- [x] Independent adversarial validator lane (vrh adversarial)
+- [x] Network boundary verification (`vrh verify-sandbox`; inspects created container HostConfig)
+- [x] Independent adversarial validator lane (`vrh adversarial`)
 - [x] Evidence export (repro outcomes + validation reports as JSON)
+- [x] CI: CodeQL + govulncheck
 
-## Phase 4: pilot
+## Phase 4: pilot (current)
 
 - [ ] Choose one authorized open-source MCP server with a local fixture
 - [ ] Run a bounded four-worker campaign
