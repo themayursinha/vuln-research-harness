@@ -123,16 +123,20 @@ func familiesCmd(args []string) error {
 }
 
 func appendFamilyEvent(dir, id, eventType, family string, data map[string]string) error {
+	if data == nil {
+		data = map[string]string{}
+	}
+	data["family"] = family
+	return appendCampaignEvent(dir, id, eventType, data)
+}
+
+func appendCampaignEvent(dir, id, eventType string, data map[string]string) error {
 	files := campaignFiles(dir)
 	ldg, err := ledger.Open(files["ledger"])
 	if err != nil {
 		return err
 	}
 	defer ldg.Close()
-	if data == nil {
-		data = map[string]string{}
-	}
-	data["family"] = family
 	_, err = ldg.Append(id, eventType, data)
 	return err
 }

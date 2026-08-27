@@ -120,7 +120,10 @@ vrh verify-sandbox ./campaigns/mcp-filesystem-server
 vrh repro cases.yaml ./campaigns/mcp-filesystem-server
 
 # Record an adversarial validation verdict for a finding
-vrh adversarial F1-json-bypass attempts.json "finding stands"
+vrh adversarial ./campaigns/mcp-filesystem-server F1-json-bypass attempts.json "finding stands"
+
+# Summarize campaign state from the ledger
+vrh campaign status ./campaigns/mcp-filesystem-server
 ```
 
 `vrh repro` fails closed: it runs the same admission gate as `round plan`

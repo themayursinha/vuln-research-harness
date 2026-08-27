@@ -36,10 +36,11 @@ vrh round ingest campaigns/<name>      # verifies gate + schema, updates registr
 
 vrh verify-sandbox campaigns/<name>    # prove the pinned image runs with network=none
 vrh repro cases.yaml campaigns/<name>  # admission + container isolation, then run cases
-vrh adversarial F1 attempts.json "finding stands"
+vrh adversarial campaigns/<name> F1 attempts.json "finding stands"
+vrh campaign status campaigns/<name>   # round, families, outstanding requests, repro/validation ledger events
 ```
 
-`round plan`, `round ingest`, and `vrh repro` all run the **admission gate** first: the
+`round plan`, `round ingest`, `vrh repro`, and `vrh adversarial` all run the **admission gate** first: the
 contract must load and validate, the campaign `source_snapshot` must equal
 the manifest digest, and the source tree must still verify against the
 manifest — including a check that no file was added or removed since the
@@ -50,6 +51,8 @@ container (`--network=none`, read-only snapshot mount, `--pull=never`).
 It refuses to execute unless the image is already local and a created
 container inspects as `--network=none`, read-only, cap-drop ALL, and
 no published ports. Process-local namespaces are used only in unit tests.
+`vrh repro` and `vrh adversarial` append `reproduction_run` and
+`validation_verdict` events to the ledger after exporting JSON evidence.
 
 The append-only ledger is the **single source of truth**; `registry.json`
 and `state.json` are materialized views reconstructed from it. Every command
