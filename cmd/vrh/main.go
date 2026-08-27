@@ -45,6 +45,18 @@ func main() {
 		err = validateCmd(os.Args[2:])
 	case "verify-sandbox":
 		err = verifySandboxCmd(os.Args[2:])
+	case "campaign":
+		if len(os.Args) < 3 {
+			usage()
+			os.Exit(2)
+		}
+		switch os.Args[2] {
+		case "status":
+			err = campaignStatusCmd(os.Args[3:])
+		default:
+			usage()
+			os.Exit(2)
+		}
 	case "version":
 		fmt.Println("vrh 0.3.0")
 	default:
@@ -67,7 +79,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  vrh round ingest <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh repro <cases.yaml> <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh verify-sandbox <campaign-dir>")
-	fmt.Fprintln(os.Stderr, "  vrh adversarial <finding-id> <attempts.json> <summary>")
+	fmt.Fprintln(os.Stderr, "  vrh adversarial <campaign-dir> <finding-id> <attempts.json> <summary>")
+	fmt.Fprintln(os.Stderr, "  vrh campaign status <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh version")
 }
 

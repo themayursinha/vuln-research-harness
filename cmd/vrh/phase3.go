@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,7 +139,30 @@ func runRepro(args []string, isolate func() error) error {
 	if err := repro.Export(outcomes, exportDir); err != nil {
 		return err
 	}
-	fmt.Println("outcomes exported:", filepath.Join(exportDir, "repro_outcomes.json"))
+	outPath := filepath.Join(exportDir, "repro_outcomes.json")
+	digest, err := digestFile(outPath)
+	if err != nil {
+		return err
+	}
+	var caseIDs, vulnCases []string
+	reproduced := 0
+	for _, o := range outcomes {
+		caseIDs = append(caseIDs, o.CaseID)
+		if o.Vulnerable {
+			reproduced++
+			vulnCases = append(vulnCases, o.CaseID)
+		}
+	}
+	if err := appendCampaignEvent(campaignDir, "repro:"+digest[:16], "reproduction_run", map[string]string{
+		"export_path":      outPath,
+		"outcomes_digest":  "sha256:" + digest,
+		"reproduced_count": strconv.Itoa(reproduced),
+		"case_ids":         strings.Join(caseIDs, ","),
+		"vulnerable_cases": strings.Join(vulnCases, ","),
+	}); err != nil {
+		return err
+	}
+	fmt.Println("outcomes exported:", outPath)
 	return nil
 }
 
@@ -178,11 +202,15 @@ func verifySandboxCmd(args []string) error {
 }
 
 func validateCmd(args []string) error {
-	if len(args) < 3 {
-		return errors.New("adversarial requires <finding-id> <attempts.json> <summary>")
+	if len(args) < 4 {
+		return errors.New("adversarial requires <campaign-dir> <finding-id> <attempts.json> <summary>")
 	}
-	findingID := strings.TrimSpace(args[0])
-	attemptsPath, summary := args[1], strings.Join(args[2:], " ")
+	campaignDir := args[0]
+	findingID := strings.TrimSpace(args[1])
+	attemptsPath, summary := args[2], strings.Join(args[3:], " ")
+	if err := requireAdmission(campaignDir); err != nil {
+		return err
+	}
 	data, err := os.ReadFile(attemptsPath)
 	if err != nil {
 		return fmt.Errorf("read attempts: %w", err)
@@ -211,6 +239,19 @@ func validateCmd(args []string) error {
 		return err
 	}
 	if err := os.Rename(tmp, outPath); err != nil {
+		return err
+	}
+	digest, err := digestFile(outPath)
+	if err != nil {
+		return err
+	}
+	if err := appendCampaignEvent(campaignDir, "validation:"+digest[:16], "validation_verdict", map[string]string{
+		"finding_id":    report.FindingID,
+		"verdict":       string(report.Verdict),
+		"attempts":      strconv.Itoa(len(report.Attempts)),
+		"export_path":   outPath,
+		"report_digest": "sha256:" + digest,
+	}); err != nil {
 		return err
 	}
 	fmt.Printf("finding %s verdict: %s (%d attempts)\nwritten to %s\n", report.FindingID, report.Verdict, len(report.Attempts), outPath)
