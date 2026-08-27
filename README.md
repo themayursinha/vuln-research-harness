@@ -92,7 +92,8 @@ vrh round ingest ./campaigns/mcp-filesystem-server
 ## Repository layout
 
 ```
-cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox)
+cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox, campaign status)
+campaigns/fixture-lab/  reference synthetic campaign (see README there)
 internal/contract/  campaign contract load/validate (YAML, digest-pinned)
 internal/registry/  approach family registry (convergence + blocked-path state)
 internal/ledger/    append-only evidence ledger (JSONL, hash-linked)
