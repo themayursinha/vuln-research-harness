@@ -17,12 +17,9 @@ fmt:
 check: vet test build
 
 FIXTURE_IMAGE ?= localhost/vrh-fixture-lab:latest
-# Same preference order as container.Detect (podman, then docker). Override with
-# CONTAINER_RUNTIME=docker|podman when both are installed and you need a specific one.
-CONTAINER_RUNTIME ?= $(shell \
-	if command -v podman >/dev/null 2>&1; then echo podman; \
-	elif command -v docker >/dev/null 2>&1; then echo docker; \
-	else echo ""; fi)
+# Same selection logic as container.Detect (podman, then docker, with version
+# and endpoint preflight). Override with CONTAINER_RUNTIME=docker|podman.
+CONTAINER_RUNTIME ?= $(shell $(GO) run ./cmd/detect-runtime/ 2>/dev/null)
 
 fixture-image:
 	@test -n "$(CONTAINER_RUNTIME)" || (echo "no container runtime (podman or docker)" >&2; exit 1)
