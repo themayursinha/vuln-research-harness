@@ -28,13 +28,12 @@ cd campaigns/fixture-lab
 ../../vrh campaign status .
 ```
 
-`make fixture-image` builds into the same runtime VRH selects via
-`container.Detect` (podman, then docker, with preflight checks—not just PATH).
-The runtime binary is resolved once; a failed build does not print a stale
-digest. Override with `CONTAINER_RUNTIME=docker` or `podman` if both are
-installed — that engine is still probed the same way. The committed
-`campaign.yaml` already records the digest from fixture creation; rebuild and
-update it if you change the Dockerfile.
+`make fixture-image` runs `cmd/fixture-image`: same `container.Detect`
+preflight as `vrh repro`, the sanitized local client environment (no
+`DOCKER_CONTEXT` / remote hosts), and a digest pin even when Docker has
+not populated `RepoDigests` (local build image ID is a valid `sha256:…`
+pin). Override with `CONTAINER_RUNTIME=docker` or `podman`. Copy the
+printed pin into `campaign.yaml` `environment.container_image`.
 
 ## What it models
 
