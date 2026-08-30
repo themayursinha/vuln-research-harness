@@ -52,8 +52,24 @@ type Spec struct {
 // Detect finds a working local podman or docker binary. It does not pull
 // images, does not create containers, and refuses a remote daemon.
 func Detect() (Runtime, error) {
+	return detectKinds("podman", "docker")
+}
+
+// DetectKind probes one runtime the same way Detect does, without falling
+// back to the other engine. Callers that requested docker or podman explicitly
+// must not silently switch runtimes.
+func DetectKind(kind string) (Runtime, error) {
+	switch kind {
+	case "podman", "docker":
+		return detectKinds(kind)
+	default:
+		return Runtime{}, fmt.Errorf("container runtime must be podman or docker, got %q", kind)
+	}
+}
+
+func detectKinds(kinds ...string) (Runtime, error) {
 	var remoteErr error
-	for _, kind := range []string{"podman", "docker"} {
+	for _, kind := range kinds {
 		bin, err := exec.LookPath(kind)
 		if err != nil {
 			continue

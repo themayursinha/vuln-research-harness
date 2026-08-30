@@ -169,6 +169,29 @@ func TestRunArgsRejectsRelativeBind(t *testing.T) {
 	}
 }
 
+func TestDetectKindRejectsUnknown(t *testing.T) {
+	if _, err := DetectKind("nerdctl"); err == nil {
+		t.Fatal("unknown runtime accepted")
+	}
+	if _, err := DetectKind(""); err == nil {
+		t.Fatal("empty runtime accepted")
+	}
+}
+
+func TestDetectKindProbesNamedRuntime(t *testing.T) {
+	rt, err := Detect()
+	if err != nil {
+		t.Skip(err)
+	}
+	got, err := DetectKind(rt.Kind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != rt.Kind || got.Bin != rt.Bin {
+		t.Fatalf("DetectKind(%s)=%+v, Detect=%+v", rt.Kind, got, rt)
+	}
+}
+
 func TestRequireImageMissing(t *testing.T) {
 	rt, err := Detect()
 	if err != nil {
