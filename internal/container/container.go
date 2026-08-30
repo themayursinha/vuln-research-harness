@@ -19,6 +19,8 @@ import (
 	"unicode"
 )
 
+var errNoPreflightEnv = errors.New("container runtime has no preflighted client environment")
+
 const (
 	SnapshotMount = "/vrh/snapshot"
 	CaseMount     = "/vrh/case"
@@ -543,7 +545,7 @@ func (w *boundedWriter) Write(p []byte) (int, error) {
 // clientEnv returns the sanitized environment captured at Detect time.
 func (rt Runtime) clientEnv() ([]string, error) {
 	if len(rt.env) == 0 {
-		return nil, fmt.Errorf("container runtime has no preflighted client environment")
+		return nil, errNoPreflightEnv
 	}
 	return copyEnv(rt.env), nil
 }

@@ -27,6 +27,10 @@ func (rt Runtime) BuildImage(ctx context.Context, contextDir, tag string) error 
 	if strings.TrimSpace(tag) == "" || strings.ContainsAny(tag, " \t\n\r") {
 		return fmt.Errorf("image tag is required and must not contain whitespace")
 	}
+	env, err := rt.clientEnv()
+	if err != nil {
+		return err
+	}
 	dir, err := filepath.Abs(contextDir)
 	if err != nil {
 		return fmt.Errorf("fixture context: %w", err)
@@ -36,10 +40,6 @@ func (rt Runtime) BuildImage(ctx context.Context, contextDir, tag string) error 
 	}
 	if _, err := os.Stat(filepath.Join(dir, "Dockerfile")); err != nil {
 		return fmt.Errorf("fixture context missing Dockerfile: %w", err)
-	}
-	env, err := rt.clientEnv()
-	if err != nil {
-		return err
 	}
 	if ctx == nil {
 		ctx = context.Background()

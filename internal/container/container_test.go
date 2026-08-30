@@ -1,6 +1,7 @@
 package container
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -301,12 +302,6 @@ func TestRuntimeRetainsPreflightEnv(t *testing.T) {
 	if strings.Join(first, "\n") != strings.Join(second, "\n") {
 		t.Fatalf("preflight env recomputed after host change:\n%s\nvs\n%s", first, second)
 	}
-	fresh, err := clientEnv(rt.Kind)
-	if err == nil && strings.Join(fresh, "\n") == strings.Join(first, "\n") {
-		// If recomputing still matches, the test host did not actually
-		// change resolution; the stored copy still must be used.
-		return
-	}
 }
 
 func TestPreflightRefusesUnpreflightedRuntime(t *testing.T) {
@@ -315,8 +310,8 @@ func TestPreflightRefusesUnpreflightedRuntime(t *testing.T) {
 	if err == nil {
 		t.Fatal("preflight without Detect env accepted")
 	}
-	if !strings.Contains(err.Error(), "preflighted") {
-		t.Fatalf("got %v, want preflighted-env error", err)
+	if !errors.Is(err, errNoPreflightEnv) {
+		t.Fatalf("got %v, want %v", err, errNoPreflightEnv)
 	}
 }
 

@@ -1,6 +1,9 @@
 package container
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -66,12 +69,16 @@ func TestBuildImageRefusesMissingDockerfile(t *testing.T) {
 }
 
 func TestBuildImageRefusesUnpreflightedRuntime(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	rt := Runtime{Bin: "/usr/bin/docker", Kind: "docker"}
-	err := rt.BuildImage(t.Context(), t.TempDir(), DefaultFixtureImage)
+	err := rt.BuildImage(t.Context(), dir, DefaultFixtureImage)
 	if err == nil {
 		t.Fatal("runtime without Detect env accepted")
 	}
-	if !strings.Contains(err.Error(), "preflighted") {
-		t.Fatalf("got %v, want preflighted-env error", err)
+	if !errors.Is(err, errNoPreflightEnv) {
+		t.Fatalf("got %v, want %v", err, errNoPreflightEnv)
 	}
 }
