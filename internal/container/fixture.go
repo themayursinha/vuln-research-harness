@@ -37,7 +37,7 @@ func (rt Runtime) BuildImage(ctx context.Context, contextDir, tag string) error 
 	if _, err := os.Stat(filepath.Join(dir, "Dockerfile")); err != nil {
 		return fmt.Errorf("fixture context missing Dockerfile: %w", err)
 	}
-	env, err := clientEnv(rt.Kind)
+	env, err := rt.clientEnv()
 	if err != nil {
 		return err
 	}
@@ -103,20 +103,21 @@ func pinFromInspect(raw []byte) (string, error) {
 }
 
 func withBuildProxyEnv(env []string) []string {
+	out := copyEnv(env)
 	keys := []string{
 		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
 		"http_proxy", "https_proxy", "no_proxy",
 	}
 	for _, key := range keys {
 		if v := os.Getenv(key); v != "" {
-			env = append(env, key+"="+v)
+			out = append(out, key+"="+v)
 		}
 	}
-	return env
+	return out
 }
 
 func (rt Runtime) preflightStdout(args ...string) ([]byte, error) {
-	env, err := clientEnv(rt.Kind)
+	env, err := rt.clientEnv()
 	if err != nil {
 		return nil, err
 	}

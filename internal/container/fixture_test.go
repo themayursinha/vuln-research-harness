@@ -64,3 +64,14 @@ func TestBuildImageRefusesMissingDockerfile(t *testing.T) {
 		t.Fatalf("got %v, want Dockerfile error", err)
 	}
 }
+
+func TestBuildImageRefusesUnpreflightedRuntime(t *testing.T) {
+	rt := Runtime{Bin: "/usr/bin/docker", Kind: "docker"}
+	err := rt.BuildImage(t.Context(), t.TempDir(), DefaultFixtureImage)
+	if err == nil {
+		t.Fatal("runtime without Detect env accepted")
+	}
+	if !strings.Contains(err.Error(), "preflighted") {
+		t.Fatalf("got %v, want preflighted-env error", err)
+	}
+}

@@ -37,6 +37,10 @@ type Runtime struct {
 	Bin      string
 	Kind     string
 	Rootless bool
+	// env is the sanitized client environment captured during Detect.
+	// Later calls reuse it so a socket disappearing mid-run cannot switch
+	// the build/inspect to a different daemon.
+	env []string
 }
 
 // Spec is one locked container invocation. Callers cannot request network,
@@ -92,7 +96,7 @@ func detectKinds(kinds ...string) (Runtime, error) {
 			remoteErr = err
 			continue
 		}
-		return Runtime{Bin: bin, Kind: kind, Rootless: rootless}, nil
+		return Runtime{Bin: bin, Kind: kind, Rootless: rootless, env: copyEnv(env)}, nil
 	}
 	if remoteErr != nil {
 		return Runtime{}, remoteErr
@@ -373,7 +377,7 @@ func (rt Runtime) Command(ctx context.Context, spec Spec, cidFile string) (*exec
 	if err != nil {
 		return nil, nil, err
 	}
-	env, err := clientEnv(rt.Kind)
+	env, err := rt.clientEnv()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -448,7 +452,7 @@ func containerAbsent(out []byte) bool {
 }
 
 func (rt Runtime) cleanup(args ...string) ([]byte, error) {
-	env, err := clientEnv(rt.Kind)
+	env, err := rt.clientEnv()
 	if err != nil {
 		return nil, err
 	}
@@ -492,7 +496,7 @@ func rootlessFromInfo(kind, out string) bool {
 }
 
 func (rt Runtime) preflight(args ...string) ([]byte, error) {
-	env, err := clientEnv(rt.Kind)
+	env, err := rt.clientEnv()
 	if err != nil {
 		return nil, err
 	}
@@ -534,6 +538,20 @@ func (w *boundedWriter) Write(p []byte) (int, error) {
 		_, _ = w.buf.Write(p[:n])
 	}
 	return len(p), nil
+}
+
+// clientEnv returns the sanitized environment captured at Detect time.
+func (rt Runtime) clientEnv() ([]string, error) {
+	if len(rt.env) == 0 {
+		return nil, fmt.Errorf("container runtime has no preflighted client environment")
+	}
+	return copyEnv(rt.env), nil
+}
+
+func copyEnv(env []string) []string {
+	out := make([]string, len(env))
+	copy(out, env)
+	return out
 }
 
 // clientEnv is the subprocess environment for podman/docker. It never
