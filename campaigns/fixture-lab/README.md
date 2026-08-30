@@ -30,8 +30,10 @@ cd campaigns/fixture-lab
 
 `make fixture-image` builds into the same runtime VRH selects via
 `container.Detect` (podman, then docker, with preflight checks—not just PATH).
-Override with `CONTAINER_RUNTIME=docker` or `podman` if both are installed. The committed `campaign.yaml` already records the digest from
-fixture creation; rebuild and update it if you change the Dockerfile.
+Detection runs once per `fixture-image` invocation. Override with
+`CONTAINER_RUNTIME=docker` or `podman` if both are installed. The committed
+`campaign.yaml` already records the digest from fixture creation; rebuild and
+update it if you change the Dockerfile.
 
 ## What it models
 
