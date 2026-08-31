@@ -1,6 +1,7 @@
 package container
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,6 +170,29 @@ func TestRunArgsRejectsRelativeBind(t *testing.T) {
 	}
 }
 
+func TestDetectKindRejectsUnknown(t *testing.T) {
+	if _, err := DetectKind("nerdctl"); err == nil {
+		t.Fatal("unknown runtime accepted")
+	}
+	if _, err := DetectKind(""); err == nil {
+		t.Fatal("empty runtime accepted")
+	}
+}
+
+func TestDetectKindProbesNamedRuntime(t *testing.T) {
+	rt, err := Detect()
+	if err != nil {
+		t.Skip(err)
+	}
+	got, err := DetectKind(rt.Kind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != rt.Kind || got.Bin != rt.Bin {
+		t.Fatalf("DetectKind(%s)=%+v, Detect=%+v", rt.Kind, got, rt)
+	}
+}
+
 func TestRequireImageMissing(t *testing.T) {
 	rt, err := Detect()
 	if err != nil {
@@ -256,6 +280,38 @@ func TestClientEnvPinsUnixAndDropsContext(t *testing.T) {
 	}
 	if !strings.Contains(joined, "CONTAINER_HOST=unix:///var/run/docker.sock") {
 		t.Fatalf("CONTAINER_HOST must be pinned to the local socket: %s", joined)
+	}
+}
+
+func TestRuntimeRetainsPreflightEnv(t *testing.T) {
+	rt, err := Detect()
+	if err != nil {
+		t.Skip(err)
+	}
+	first, err := rt.clientEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DOCKER_HOST", "unix:///tmp/vrh-other-docker.sock")
+	t.Setenv("CONTAINER_HOST", "unix:///tmp/vrh-other-podman.sock")
+	t.Setenv("DOCKER_CONTEXT", "desktop-linux")
+	second, err := rt.clientEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(first, "\n") != strings.Join(second, "\n") {
+		t.Fatalf("preflight env recomputed after host change:\n%s\nvs\n%s", first, second)
+	}
+}
+
+func TestPreflightRefusesUnpreflightedRuntime(t *testing.T) {
+	rt := Runtime{Bin: "/usr/bin/docker", Kind: "docker"}
+	_, err := rt.preflight("version")
+	if err == nil {
+		t.Fatal("preflight without Detect env accepted")
+	}
+	if !errors.Is(err, errNoPreflightEnv) {
+		t.Fatalf("got %v, want %v", err, errNoPreflightEnv)
 	}
 }
 

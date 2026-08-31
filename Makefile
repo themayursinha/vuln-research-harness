@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt check clean
+.PHONY: build test vet fmt check clean fixture-image
 
 GO ?= go
 
@@ -17,11 +17,12 @@ fmt:
 check: vet test build
 
 FIXTURE_IMAGE ?= localhost/vrh-fixture-lab:latest
+# Builds via cmd/fixture-image: same Detect/DetectKind preflight and sanitized
+# clientEnv as vrh repro (local unix socket, no DOCKER_CONTEXT). Override with
+# CONTAINER_RUNTIME=docker|podman.
 
 fixture-image:
-	docker build -t $(FIXTURE_IMAGE) campaigns/fixture-lab
-	@echo "container_image for campaign.yaml:"
-	@docker image inspect $(FIXTURE_IMAGE) --format '{{index .RepoDigests 0}}' 2>/dev/null || docker image inspect $(FIXTURE_IMAGE) --format '{{.Id}}'
+	CONTAINER_RUNTIME="$(CONTAINER_RUNTIME)" $(GO) run ./cmd/fixture-image/ -image "$(FIXTURE_IMAGE)"
 
 clean:
 	rm -rf vrh
