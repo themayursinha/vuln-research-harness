@@ -557,6 +557,31 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 		},
 
 		{
+			name:    "nested wildcard branch still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://|.*)$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "nested clean branches stay constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https|wss)://"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "deeply nested wildcard branch still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(a|(b|.*))$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "parent array anyOf union-typed items stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","anyOf":[{"type":["array","string"],"items":{"enum":["https://safe.invalid"]}}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:    "parent array anyOf union-typed plain items still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","anyOf":[{"type":["array","string"],"items":{"type":"string"}}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
 			name:    "closed tuple with viable plain slot still emits",
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"string"}],"items":false}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},

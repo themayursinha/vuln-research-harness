@@ -302,29 +302,49 @@ func (e *constraintEval) searchEveryItemList(items []any, kind constraintKind, d
 }
 
 func arrayConstraintAppliesCtx(node map[string]any, arrayCtx bool) bool {
-	_, ok := declaredTypes(node)
+	types, ok := declaredTypes(node)
 	if !ok {
 		// Untyped nodes still accept scalar strings, so items/prefixItems
 		// keywords do not constrain the argument — unless an enclosing
 		// allOf conjunction already forces array-only typing, in which
 		// case every accepted instance is an array.
 		if arrayCtx {
-			_, hasItems := node["items"]
-			_, hasPrefix := node["prefixItems"]
-			return hasItems || hasPrefix
+			return hasItemsOrPrefixItems(node)
 		}
 		return false
+	}
+	if arrayCtx {
+		// Under array forcing the parent rejects every non-array
+		// alternative (for example the string half of ["array","string"]),
+		// so only whether this branch itself allows arrays matters.
+		if !hasDeclaredType(types, "array") {
+			return false
+		}
+		return hasItemsOrPrefixItems(node)
 	}
 	if !declaresArrayOnly(node) {
 		// A viable non-array scalar (string, object, unknown, or a union
 		// containing one) is unaffected by item constraints.
 		return false
 	}
+	return hasItemsOrPrefixItems(node)
+}
+
+func hasItemsOrPrefixItems(node map[string]any) bool {
 	if _, ok := node["items"]; ok {
 		return true
 	}
-	_, ok = node["prefixItems"]
+	_, ok := node["prefixItems"]
 	return ok
+}
+
+func hasDeclaredType(types []string, want string) bool {
+	for _, t := range types {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *constraintEval) viableForKind(node schemaNode, kind constraintKind, depth int) bool {
@@ -635,7 +655,85 @@ func patternConstrainsURL(pat string) bool {
 			return false
 		}
 	}
+	return nestedAlternativesConstrained(low)
+}
+
+// nestedAlternativesConstrained reports whether every group-internal
+// alternative is free of unbounded skips before its URL marker. An anchored
+// early marker on the whole pattern is not enough when a nested branch such
+// as .* in ^(https://|.*)$ accepts arbitrary URLs on its own.
+func nestedAlternativesConstrained(pat string) bool {
+	for _, inner := range groupInnerTexts(pat) {
+		alts := splitTopLevelAlternatives(inner)
+		if len(alts) < 2 {
+			continue
+		}
+		for _, alt := range alts {
+			if hasUnboundedSkipBeforeMarker(alt) {
+				return false
+			}
+		}
+	}
 	return true
+}
+
+// hasUnboundedSkipBeforeMarker reports whether frag can match an arbitrary
+// prefix before any URL marker appears (or at all, when the fragment carries
+// no marker). Fixed text without markers (such as wss in ^(https|wss)://)
+// still pins the value; a skip such as .* does not.
+func hasUnboundedSkipBeforeMarker(frag string) bool {
+	low := strings.ToLower(frag)
+	marker := strings.Index(low, "http")
+	if j := strings.Index(low, "://"); j >= 0 && (marker < 0 || j < marker) {
+		marker = j
+	}
+	if j := strings.Index(low, "scheme"); j >= 0 && (marker < 0 || j < marker) {
+		marker = j
+	}
+	prefix := low
+	if marker >= 0 {
+		prefix = low[:marker]
+	}
+	return hasUnboundedSkip(prefix)
+}
+
+// groupInnerTexts returns the inner text of every parenthesized group in
+// pat, innermost included, honoring escapes and character classes.
+// Unterminated groups run to the end of the pattern.
+func groupInnerTexts(pat string) []string {
+	var inners []string
+	var stack []int
+	inClass := false
+	escaped := false
+	for i := 0; i < len(pat); i++ {
+		c := pat[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '(':
+			if !inClass {
+				stack = append(stack, i)
+			}
+		case ')':
+			if !inClass && len(stack) > 0 {
+				open := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				inners = append(inners, pat[open+1:i])
+			}
+		}
+	}
+	for _, open := range stack {
+		inners = append(inners, pat[open+1:])
+	}
+	return inners
 }
 
 // anchoredMarkerConstrainsURL reports whether one top-level regex alternative
