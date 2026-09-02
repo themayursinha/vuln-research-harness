@@ -124,7 +124,9 @@ func (e *constraintEval) searchComposition(node map[string]any, kind constraintK
 		}
 	}
 	for _, key := range []string{"anyOf", "oneOf"} {
-		if e.searchEveryBranch(node[key], kind, depth, arrayCtx) {
+		// A disjunction under an array-only node (declared here or inherited
+		// from an enclosing conjunction) operates on arrays in every branch.
+		if e.searchEveryBranch(node[key], kind, depth, arrayCtx || declaresArrayOnly(node)) {
 			return true
 		}
 	}
@@ -147,6 +149,9 @@ func (e *constraintEval) searchEveryBranch(v any, kind constraintKind, depth int
 	}
 	var viable []schemaNode
 	for _, child := range branches {
+		if arrayCtx && branchExcludedByArrayParent(child) {
+			continue
+		}
 		if e.viableForKind(child, kind, depth+1) {
 			viable = append(viable, child)
 		}
@@ -156,6 +161,31 @@ func (e *constraintEval) searchEveryBranch(v any, kind constraintKind, depth int
 	}
 	for _, child := range viable {
 		if !e.searchCtx(child, kind, depth+1, arrayCtx) {
+			return false
+		}
+	}
+	return true
+}
+
+// branchExcludedByArrayParent reports whether a disjunction branch declares
+// only known non-array types. Under an array-forcing parent such a branch
+// accepts values the parent rejects, so it contributes no accepted values
+// and is skipped like any other non-viable branch.
+func branchExcludedByArrayParent(b schemaNode) bool {
+	if b.kind != schemaObject {
+		return false
+	}
+	types, ok := declaredTypes(b.obj)
+	if !ok {
+		return false
+	}
+	for _, t := range types {
+		switch t {
+		case "array":
+			return false
+		case "string", "object", "boolean", "null", "number", "integer":
+			continue
+		default:
 			return false
 		}
 	}
@@ -527,7 +557,7 @@ func directURLConstraint(schema map[string]any) bool {
 			return true
 		}
 	}
-	if pat, ok := schemaString(schema, "pattern"); ok && patternConstrainsURL(pat) {
+	if pat, ok := schemaString(schema, "pattern"); ok && patternApplies(schema) && patternConstrainsURL(pat) {
 		return true
 	}
 	return false
@@ -537,7 +567,7 @@ func directPathConstraint(schema map[string]any) bool {
 	if hasEnumOrConst(schema) {
 		return true
 	}
-	if pat, ok := schemaString(schema, "pattern"); ok && !isVacuousPattern(pat) {
+	if pat, ok := schemaString(schema, "pattern"); ok && patternApplies(schema) && !isVacuousPattern(pat) {
 		return true
 	}
 	for _, key := range []string{
@@ -555,10 +585,31 @@ func directCommandConstraint(schema map[string]any) bool {
 	if hasEnumOrConst(schema) {
 		return true
 	}
-	if pat, ok := schemaString(schema, "pattern"); ok && !isVacuousPattern(pat) {
+	if pat, ok := schemaString(schema, "pattern"); ok && patternApplies(schema) && !isVacuousPattern(pat) {
 		return true
 	}
 	return false
+}
+
+// patternApplies reports whether a "pattern" keyword can constrain the value
+// kind at this node. Pattern tests string instances only, so on nodes that
+// may hold arrays or objects (array/object type, unknown types, or untyped
+// nodes that still accept them) the pattern leaves those alternatives
+// uncovered; array elements are evaluated separately via item constraints.
+func patternApplies(node map[string]any) bool {
+	types, ok := declaredTypes(node)
+	if !ok {
+		return false
+	}
+	for _, t := range types {
+		switch t {
+		case "string", "null", "boolean", "number", "integer":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func hasEnumOrConst(schema map[string]any) bool {
@@ -578,40 +629,116 @@ func patternConstrainsURL(pat string) bool {
 	if isVacuousPattern(pat) {
 		return false
 	}
-	if !isAnchoredPattern(pat) {
-		// JSON Schema patterns are unanchored substring searches, so a
-		// marker like "https?" also matches values such as
-		// "file:///tmp/http". Only an anchored pattern actually constrains
-		// the scheme or host.
-		return false
-	}
 	low := strings.ToLower(pat)
-	return strings.Contains(low, "http") || strings.Contains(low, "://") || strings.Contains(low, "scheme")
-}
-
-// isAnchoredPattern reports whether pat anchors its match at the start of
-// the value, tolerating leading inline flag groups such as "(?i)".
-func isAnchoredPattern(pat string) bool {
-	rest := strings.TrimSpace(pat)
-	for strings.HasPrefix(rest, "(?") {
-		end := strings.Index(rest, ")")
-		if end < 0 {
+	for _, alt := range splitTopLevelAlternatives(low) {
+		if !anchoredMarkerConstrainsURL(alt) {
 			return false
 		}
-		rest = rest[end+1:]
 	}
-	return strings.HasPrefix(rest, "^")
+	return true
 }
 
-func isVacuousPattern(pat string) bool {
-	s := strings.TrimSpace(pat)
+// anchoredMarkerConstrainsURL reports whether one top-level regex alternative
+// pins a URL marker (http, ://, scheme) at its anchored start. JSON Schema
+// patterns are unanchored substring searches, so a merely contained marker
+// (as in "https?" or "^.*https?") also matches values like
+// "file:///tmp/http" and constrains nothing.
+func anchoredMarkerConstrainsURL(alt string) bool {
+	rest := stripLeadingRegexGroups(strings.TrimSpace(alt))
+	if !strings.HasPrefix(rest, "^") {
+		return false
+	}
+	marker := strings.Index(rest, "http")
+	if i := strings.Index(rest, "://"); i >= 0 && (marker < 0 || i < marker) {
+		marker = i
+	}
+	if i := strings.Index(rest, "scheme"); i >= 0 && (marker < 0 || i < marker) {
+		marker = i
+	}
+	if marker < 0 {
+		return false
+	}
+	return !hasUnboundedSkip(rest[1:marker])
+}
+
+// hasUnboundedSkip reports whether a regex fragment can skip an arbitrary
+// prefix, letting a later marker float (for example ".*" in "^.*https?").
+// Fixed-width prefixes (literals, bounded groups) still pin the marker.
+func hasUnboundedSkip(frag string) bool {
+	if strings.Contains(frag, "*") || strings.Contains(frag, "+") {
+		return true
+	}
+	for i := 0; i < len(frag); i++ {
+		if frag[i] != '{' {
+			continue
+		}
+		end := strings.Index(frag[i:], "}")
+		if end < 0 {
+			continue
+		}
+		if strings.Contains(frag[i:i+end], ",") {
+			return true
+		}
+	}
+	return false
+}
+
+// splitTopLevelAlternatives splits a regex source on "|" operators that sit
+// outside groups, character classes, and escapes, so each alternative can be
+// checked for its own anchor. A malformed remainder is kept whole, which
+// fails the anchor check conservatively.
+func splitTopLevelAlternatives(pat string) []string {
+	var alts []string
+	depth := 0
+	inClass := false
+	escaped := false
+	start := 0
+	for i := 0; i < len(pat); i++ {
+		c := pat[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '(':
+			if !inClass {
+				depth++
+			}
+		case ')':
+			if !inClass && depth > 0 {
+				depth--
+			}
+		case '|':
+			if !inClass && depth == 0 {
+				alts = append(alts, pat[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(alts, pat[start:])
+}
+
+// stripLeadingRegexGroups removes leading "(?...)" groups such as inline
+// flags ("(?i)") so anchoring and marker checks see the effective start.
+func stripLeadingRegexGroups(s string) string {
 	for strings.HasPrefix(s, "(?") {
 		end := strings.Index(s, ")")
 		if end < 0 {
-			break
+			return s
 		}
 		s = strings.TrimSpace(s[end+1:])
 	}
+	return s
+}
+
+func isVacuousPattern(pat string) bool {
+	s := stripLeadingRegexGroups(strings.TrimSpace(pat))
 	switch s {
 	case "", ".*", ".+", "^", "$",
 		"^.*", "^.+", ".*$", ".+$", "^.*$", "^.+$",

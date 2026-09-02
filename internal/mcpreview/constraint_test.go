@@ -511,6 +511,52 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
 		},
 		{
+			name:    "anchored wildcard-prefix url pattern still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^.*https?"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "grouped anchored url pattern stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https?://)"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "alternatives all anchored stay constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^https://|^wss://"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "half-anchored alternative still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^https://|ftp"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "array pattern with plain items still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","pattern":"^https://","items":{"type":"string"}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "array pattern with enum items stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","pattern":"^https://","items":{"enum":["https://safe.invalid"]}}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:    "untyped pattern with plain items still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"pattern":"^https://","items":{"type":"string"}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "parent array anyOf all items constrained stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","anyOf":[{"items":{"enum":["https://safe.invalid"]}},{"items":{"const":"https://safe.invalid"}}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:    "parent array anyOf with plain branch still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","anyOf":[{"items":{"enum":["https://safe.invalid"]}},{"items":{"type":"string"}}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+
+		{
 			name:    "closed tuple with viable plain slot still emits",
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"string"}],"items":false}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
