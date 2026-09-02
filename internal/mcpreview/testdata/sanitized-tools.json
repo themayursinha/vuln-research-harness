@@ -1,0 +1,39 @@
+{
+  "tools": [
+    {
+      "name": "exec_shell",
+      "description": "Runs a command against local files and fetches a url",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "path": { "type": "string" },
+          "url": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "safe_echo",
+      "description": "Echo a token from a fixed list",
+      "inputSchema": {
+        "type": "object",
+        "xCustom": { "ignored": true },
+        "properties": {
+          "url": {
+            "type": "string",
+            "enum": ["https://example.invalid/health"]
+          },
+          "path": {
+            "type": "string",
+            "root": "/tmp/sandbox",
+            "pattern": "^/tmp/sandbox/"
+          },
+          "command": {
+            "type": "string",
+            "enum": ["status"]
+          }
+        }
+      }
+    }
+  ]
+}

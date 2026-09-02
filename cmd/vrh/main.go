@@ -57,6 +57,8 @@ func main() {
 			usage()
 			os.Exit(2)
 		}
+	case "review-mcp-schema":
+		err = reviewMCPSchemaCmd(os.Args[2:])
 	case "version":
 		fmt.Println("vrh 0.3.0")
 	default:
@@ -81,6 +83,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  vrh verify-sandbox <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh adversarial <campaign-dir> <finding-id> <attempts.json> <summary>")
 	fmt.Fprintln(os.Stderr, "  vrh campaign status <campaign-dir>")
+	fmt.Fprintln(os.Stderr, "  vrh review-mcp-schema <tools.json>")
 	fmt.Fprintln(os.Stderr, "  vrh version")
 }
 

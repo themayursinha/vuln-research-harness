@@ -87,12 +87,15 @@ vrh families list ./campaigns/mcp-filesystem-server
 # isolation, then ingest validated results
 vrh round plan ./campaigns/mcp-filesystem-server 4
 vrh round ingest ./campaigns/mcp-filesystem-server
+
+# Review sanitized MCP tool schemas offline (hypotheses only; no target execution)
+vrh review-mcp-schema ./tools.json
 ```
 
 ## Repository layout
 
 ```
-cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox, campaign status)
+cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox, campaign status, review-mcp-schema)
 campaigns/fixture-lab/  reference synthetic campaign (see README there)
 internal/contract/  campaign contract load/validate (YAML, digest-pinned)
 internal/registry/  approach family registry (convergence + blocked-path state)
@@ -106,6 +109,7 @@ internal/repro/     minimal reproduction runner (marker + pinned snapshot)
 internal/container/ disposable OCI adapter (digest-pinned image, network none)
 internal/sandbox/   network-denial probes (fail-closed)
 internal/validate/  adversarial disproof lane
+internal/mcpreview/ offline MCP tool-schema reviewer (trust-boundary hypotheses only)
 docs/               method, safety model, contract reference, campaign layout, roadmap
 ```
 
