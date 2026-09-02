@@ -68,7 +68,7 @@ func splitIdent(s string) []string {
 
 func privilegedNameToken(name string) (string, bool) {
 	for _, tok := range splitIdent(name) {
-		if _, ok := privilegedNameTokens[tok]; ok {
+		if tokenInSet(tok, privilegedNameTokens) {
 			return tok, true
 		}
 	}
@@ -77,11 +77,29 @@ func privilegedNameToken(name string) (string, bool) {
 
 func firstTokenMatch(name string, set map[string]struct{}) (string, bool) {
 	for _, tok := range splitIdent(name) {
-		if _, ok := set[tok]; ok {
+		if tokenInSet(tok, set) {
 			return name, true
 		}
 	}
 	return "", false
+}
+
+func tokenInSet(tok string, set map[string]struct{}) bool {
+	if _, ok := set[tok]; ok {
+		return true
+	}
+	if singular := singularToken(tok); singular != tok {
+		_, ok := set[singular]
+		return ok
+	}
+	return false
+}
+
+func singularToken(tok string) string {
+	if len(tok) > 1 && strings.HasSuffix(tok, "s") {
+		return tok[:len(tok)-1]
+	}
+	return tok
 }
 
 func formatCue(schema map[string]any, set map[string]struct{}) (string, bool) {

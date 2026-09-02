@@ -10,6 +10,9 @@ import (
 const (
 	maxConstraintDepth = 32
 	maxVisitedNodes    = 256
+
+	limitDepth   = "depth"
+	limitVisited = "visited_nodes"
 )
 
 type schemaKind int
@@ -71,11 +74,13 @@ type schemaWalker struct {
 	active     map[string]struct{}
 	activeRefs map[string]struct{}
 	visited    int
+	truncated  bool
+	limitHit   string
 }
 
-func walkSchema(schema map[string]any, loc string, visit schemaVisitor) {
+func walkSchema(schema map[string]any, loc string, visit schemaVisitor) (truncated bool, limitHit string) {
 	if schema == nil {
-		return
+		return false, ""
 	}
 	w := &schemaWalker{
 		root:       schema,
@@ -87,10 +92,16 @@ func walkSchema(schema map[string]any, loc string, visit schemaVisitor) {
 		node: schemaNode{kind: schemaObject, obj: schema},
 		loc:  loc,
 	}, false)
+	return w.truncated, w.limitHit
 }
 
 func (w *schemaWalker) enter(f walkFrame, callVisit bool) {
-	if f.depth >= maxConstraintDepth || w.visited >= maxVisitedNodes {
+	if f.depth >= maxConstraintDepth {
+		w.noteTruncation(limitDepth)
+		return
+	}
+	if w.visited >= maxVisitedNodes {
+		w.noteTruncation(limitVisited)
 		return
 	}
 	switch f.node.kind {
@@ -312,6 +323,13 @@ func decodeJSONPointerToken(token string) string {
 	token = strings.ReplaceAll(token, "~1", "/")
 	token = strings.ReplaceAll(token, "~0", "~")
 	return token
+}
+
+func (w *schemaWalker) noteTruncation(limit string) {
+	w.truncated = true
+	if w.limitHit == "" {
+		w.limitHit = limit
+	}
 }
 
 func asObject(v any) (map[string]any, bool) {

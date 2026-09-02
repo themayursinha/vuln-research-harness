@@ -36,6 +36,8 @@ type Report struct {
 	Kind       string       `json:"kind"`
 	Disclaimer string       `json:"disclaimer"`
 	Hypotheses []Hypothesis `json:"hypotheses"`
+	Truncated  bool         `json:"truncated,omitempty"`
+	LimitHit   string       `json:"limit_hit,omitempty"`
 }
 
 // Hypothesis is one deterministic triage signal. It is not a confirmed finding.
@@ -153,7 +155,7 @@ func reviewTool(rep *reporter, name, description string, schema map[string]any) 
 		})
 	}
 	eval := newConstraintEval(schema)
-	walkSchema(schema, "inputSchema", func(loc, propName string, node, origin schemaNode) {
+	truncated, limitHit := walkSchema(schema, "inputSchema", func(loc, propName string, node, origin schemaNode) {
 		keywords := node.keywords()
 		if desc, _ := keywords["description"].(string); desc != "" {
 			if matched := boundaryMatches(desc); len(matched) > 0 {
@@ -194,11 +196,14 @@ func reviewTool(rep *reporter, name, description string, schema map[string]any) 
 			})
 		}
 	})
+	rep.noteTruncation(truncated, limitHit)
 }
 
 type reporter struct {
-	seen  map[string]struct{}
-	items []Hypothesis
+	seen      map[string]struct{}
+	items     []Hypothesis
+	truncated bool
+	limitHit  string
 }
 
 func newReporter() *reporter {
@@ -212,6 +217,16 @@ func (r *reporter) add(h Hypothesis) {
 	}
 	r.seen[key] = struct{}{}
 	r.items = append(r.items, h)
+}
+
+func (r *reporter) noteTruncation(truncated bool, limitHit string) {
+	if !truncated {
+		return
+	}
+	r.truncated = true
+	if r.limitHit == "" {
+		r.limitHit = limitHit
+	}
 }
 
 func (r *reporter) finish() Report {
@@ -240,5 +255,7 @@ func (r *reporter) finish() Report {
 		Kind:       ReportKind,
 		Disclaimer: Disclaimer,
 		Hypotheses: items,
+		Truncated:  r.truncated,
+		LimitHit:   r.limitHit,
 	}
 }

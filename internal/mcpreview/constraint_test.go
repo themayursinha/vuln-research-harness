@@ -2,6 +2,7 @@ package mcpreview
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -33,9 +34,9 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
-			name:   "url constrained via anyOf hostname",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"anyOf":[{"type":"string"},{"hostname":"example.invalid"}]}}}}`),
-			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+			name:    "url unconstrained via mixed anyOf hostname",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"anyOf":[{"type":"string"},{"hostname":"example.invalid"}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
 			name:    "url unconstrained via anyOf type only",
@@ -312,6 +313,31 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"config":{"$ref":"#/$defs/Deep"}},"$defs":{"Deep":` + wrapNestedProperty(`{"properties":{"url":{"type":"string"}}}`, maxConstraintDepth+8) + `}}}`),
 			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.$defs.Deep.properties.url"}, {CategoryUnconstrainedURL, "inputSchema.$defs.Deep.properties.n.properties.url"}},
 		},
+		{
+			name:    "oneOf mixed constrained and unconstrained string is unconstrained",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"oneOf":[{"type":"string","enum":["https://example.invalid"]},{"type":"string"}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "oneOf every branch constrains",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"oneOf":[{"enum":["https://example.invalid"]},{"const":"https://other.invalid"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "anyOf mixed constrained and unconstrained string is unconstrained",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"anyOf":[{"type":"string","hostname":"example.invalid"},{"type":"string"}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "anyOf every branch constrains",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"anyOf":[{"enum":["https://example.invalid"]},{"hostname":"example.invalid"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "allOf with one constraining branch stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"allOf":[{"type":"string"},{"enum":["https://example.invalid"]}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -454,9 +480,87 @@ func TestWrapHelpersProduceJSON(t *testing.T) {
 		wrapAllOf(`{"enum":["https://example.invalid"]}`, 3),
 		allOfPadding(4, `{"enum":["https://example.invalid"]}`),
 		wrapNestedProperty(`{"properties":{"url":{"type":"string"}}}`, 3),
+		paddedNoteProperties(4, `"url":{"type":"string"}`),
 	} {
 		if !json.Valid([]byte(s)) {
 			t.Fatalf("helper produced invalid JSON: %s", s)
 		}
 	}
+}
+
+func TestReviewReportsTraversalTruncation(t *testing.T) {
+	t.Run("visited_nodes", func(t *testing.T) {
+		input := toolsJSON(`{"name":"alpha","inputSchema":{"properties":` + paddedNoteProperties(maxVisitedNodes+8, `"file":{"type":"string"},"url":{"type":"string"}`) + `}}`)
+		rep := mustReview(t, input)
+		if !rep.Truncated {
+			t.Fatalf("expected truncated report, got %+v", rep)
+		}
+		if rep.LimitHit != limitVisited {
+			t.Fatalf("limit_hit=%q want %q", rep.LimitHit, limitVisited)
+		}
+		if findHypothesis(rep, CategoryUnconstrainedPath, "inputSchema.properties.file") == nil {
+			t.Fatalf("hypothesis before cutoff omitted: %+v", rep.Hypotheses)
+		}
+		if findHypothesis(rep, CategoryUnconstrainedURL, "inputSchema.properties.url") != nil {
+			t.Fatalf("url after cutoff should not be visited: %+v", rep.Hypotheses)
+		}
+		out, err := Encode(rep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(out), `"truncated":true`) {
+			t.Fatalf("Encode missing truncated signal: %s", out)
+		}
+		if !strings.Contains(string(out), `"limit_hit":"`+limitVisited+`"`) {
+			t.Fatalf("Encode missing limit_hit: %s", out)
+		}
+	})
+	t.Run("depth", func(t *testing.T) {
+		input := toolsJSON(`{"name":"alpha","inputSchema":` + wrapNestedProperty(`{"properties":{"url":{"type":"string"}}}`, maxConstraintDepth+8) + `}`)
+		rep := mustReview(t, input)
+		if !rep.Truncated {
+			t.Fatalf("expected truncated report, got %+v", rep)
+		}
+		if rep.LimitHit != limitDepth {
+			t.Fatalf("limit_hit=%q want %q", rep.LimitHit, limitDepth)
+		}
+		if findHypothesis(rep, CategoryUnconstrainedURL, "inputSchema.properties.url") != nil {
+			t.Fatalf("deep url should not be visited: %+v", rep.Hypotheses)
+		}
+		if hasCategory(rep, CategoryUnconstrainedURL) {
+			t.Fatalf("unexpected url hypothesis without truncation context: %+v", rep.Hypotheses)
+		}
+	})
+	t.Run("complete review omits truncation fields", func(t *testing.T) {
+		rep := mustReview(t, toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string"}}}}`))
+		if rep.Truncated || rep.LimitHit != "" {
+			t.Fatalf("complete review must not look truncated: %+v", rep)
+		}
+		out, err := Encode(rep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(out), `"truncated"`) || strings.Contains(string(out), `"limit_hit"`) {
+			t.Fatalf("complete Encode leaked truncation fields: %s", out)
+		}
+	})
+}
+
+func paddedNoteProperties(n int, extra string) string {
+	var b strings.Builder
+	b.WriteByte('{')
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `"note%03d":{"type":"string"}`, i)
+	}
+	if extra != "" {
+		if n > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(extra)
+	}
+	b.WriteByte('}')
+	return b.String()
 }

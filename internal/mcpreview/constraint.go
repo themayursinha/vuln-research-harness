@@ -93,22 +93,53 @@ func (e *constraintEval) searchRef(ref string, kind constraintKind, depth int) b
 }
 
 func (e *constraintEval) searchComposition(node map[string]any, kind constraintKind, depth int) bool {
-	for _, key := range []string{"allOf", "anyOf", "oneOf"} {
-		arr, ok := node[key].([]any)
-		if !ok {
-			continue
-		}
-		for _, item := range arr {
-			child, ok := asSchema(item)
-			if !ok {
-				continue
-			}
-			if e.search(child, kind, depth+1) {
-				return true
-			}
+	if e.searchAnyBranch(node["allOf"], kind, depth) {
+		return true
+	}
+	for _, key := range []string{"anyOf", "oneOf"} {
+		if e.searchEveryBranch(node[key], kind, depth) {
+			return true
 		}
 	}
 	return false
+}
+
+func (e *constraintEval) searchAnyBranch(v any, kind constraintKind, depth int) bool {
+	for _, child := range schemaBranches(v) {
+		if e.search(child, kind, depth+1) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *constraintEval) searchEveryBranch(v any, kind constraintKind, depth int) bool {
+	branches := schemaBranches(v)
+	if len(branches) == 0 {
+		return false
+	}
+	for _, child := range branches {
+		if !e.search(child, kind, depth+1) {
+			return false
+		}
+	}
+	return true
+}
+
+func schemaBranches(v any) []schemaNode {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	var branches []schemaNode
+	for _, item := range arr {
+		child, ok := asSchema(item)
+		if !ok {
+			continue
+		}
+		branches = append(branches, child)
+	}
+	return branches
 }
 
 func (e *constraintEval) direct(node map[string]any, kind constraintKind) bool {

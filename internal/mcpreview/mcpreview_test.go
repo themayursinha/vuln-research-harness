@@ -158,6 +158,44 @@ func TestReviewConstrainedArgumentsProduceNoMatchingHypothesis(t *testing.T) {
 	}
 }
 
+func TestReviewPluralArgumentNames(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantCat string
+		wantLoc string
+	}{
+		{
+			name:    "urls array with plain-string items",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","items":{"type":"string"}}}}}`),
+			wantCat: CategoryUnconstrainedURL,
+			wantLoc: "inputSchema.properties.urls",
+		},
+		{
+			name:    "webhooks array with plain-string items",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"webhooks":{"type":"array","items":{"type":"string"}}}}}`),
+			wantCat: CategoryUnconstrainedURL,
+			wantLoc: "inputSchema.properties.webhooks",
+		},
+		{
+			name:    "endpoints array with plain-string items",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"endpoints":{"type":"array","items":{"type":"string"}}}}}`),
+			wantCat: CategoryUnconstrainedURL,
+			wantLoc: "inputSchema.properties.endpoints",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rep := mustReview(t, tt.input)
+			h := findHypothesis(rep, tt.wantCat, tt.wantLoc)
+			if h == nil {
+				t.Fatalf("missing %s at %s in %+v", tt.wantCat, tt.wantLoc, rep.Hypotheses)
+			}
+			assertHypothesisTriage(t, *h)
+		})
+	}
+}
+
 func TestReviewNestedProperties(t *testing.T) {
 	input := toolsJSON(`{"name":"alpha","inputSchema":{"type":"object","properties":{"outer":{"type":"object","properties":{"callback_url":{"type":"string"},"nested":{"type":"object","properties":{"path":{"type":"string"}}}}}}}}`)
 	rep := mustReview(t, input)
