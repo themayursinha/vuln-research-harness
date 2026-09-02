@@ -51,6 +51,10 @@ func (e *constraintEval) unconstrained(node, origin schemaNode, kind constraintK
 }
 
 func (e *constraintEval) search(node schemaNode, kind constraintKind, depth int) bool {
+	return e.searchCtx(node, kind, depth, false)
+}
+
+func (e *constraintEval) searchCtx(node schemaNode, kind constraintKind, depth int, arrayCtx bool) bool {
 	if node.kind == schemaInvalid {
 		return false
 	}
@@ -66,7 +70,10 @@ func (e *constraintEval) search(node schemaNode, kind constraintKind, depth int)
 		return false
 	}
 	obj := node.obj
-	id := fmt.Sprintf("%p:%d", obj, kind)
+	// The array context changes what counts as a constraint, so it is part
+	// of the memo/cycle identity: a node constrained only via inherited
+	// array typing must not memoize as constrained for unforced lookups.
+	id := fmt.Sprintf("%p:%d:%t", obj, kind, arrayCtx)
 	if _, ok := e.memo[id]; ok {
 		return true
 	}
@@ -78,14 +85,14 @@ func (e *constraintEval) search(node schemaNode, kind constraintKind, depth int)
 	found := e.direct(obj, kind)
 	if !found {
 		if ref, ok := obj["$ref"].(string); ok {
-			found = e.searchRef(ref, kind, depth)
+			found = e.searchRef(ref, kind, depth, arrayCtx)
 		}
 	}
 	if !found {
-		found = e.searchComposition(obj, kind, depth)
+		found = e.searchComposition(obj, kind, depth, arrayCtx)
 	}
 	if !found {
-		found = e.searchArrayItems(obj, kind, depth)
+		found = e.searchArrayItems(obj, kind, depth, arrayCtx)
 	}
 	delete(e.active, id)
 	if found {
@@ -94,7 +101,7 @@ func (e *constraintEval) search(node schemaNode, kind constraintKind, depth int)
 	return found
 }
 
-func (e *constraintEval) searchRef(ref string, kind constraintKind, depth int) bool {
+func (e *constraintEval) searchRef(ref string, kind constraintKind, depth int, arrayCtx bool) bool {
 	if _, looping := e.activeRefs[ref]; looping {
 		return false
 	}
@@ -103,33 +110,37 @@ func (e *constraintEval) searchRef(ref string, kind constraintKind, depth int) b
 		return false
 	}
 	e.activeRefs[ref] = struct{}{}
-	found := e.search(target, kind, depth+1)
+	// A $ref names the same instance, so the enclosing array context carries
+	// over to the target.
+	found := e.searchCtx(target, kind, depth+1, arrayCtx)
 	delete(e.activeRefs, ref)
 	return found
 }
 
-func (e *constraintEval) searchComposition(node map[string]any, kind constraintKind, depth int) bool {
-	if e.searchAnyBranch(node["allOf"], kind, depth) {
-		return true
+func (e *constraintEval) searchComposition(node map[string]any, kind constraintKind, depth int, arrayCtx bool) bool {
+	if branches := schemaBranches(node["allOf"]); len(branches) > 0 {
+		if e.searchAnyBranch(branches, kind, depth, arrayCtx || allOfForcesArray(node, branches)) {
+			return true
+		}
 	}
 	for _, key := range []string{"anyOf", "oneOf"} {
-		if e.searchEveryBranch(node[key], kind, depth) {
+		if e.searchEveryBranch(node[key], kind, depth, arrayCtx) {
 			return true
 		}
 	}
 	return false
 }
 
-func (e *constraintEval) searchAnyBranch(v any, kind constraintKind, depth int) bool {
-	for _, child := range schemaBranches(v) {
-		if e.search(child, kind, depth+1) {
+func (e *constraintEval) searchAnyBranch(branches []schemaNode, kind constraintKind, depth int, arrayCtx bool) bool {
+	for _, child := range branches {
+		if e.searchCtx(child, kind, depth+1, arrayCtx) {
 			return true
 		}
 	}
 	return false
 }
 
-func (e *constraintEval) searchEveryBranch(v any, kind constraintKind, depth int) bool {
+func (e *constraintEval) searchEveryBranch(v any, kind constraintKind, depth int, arrayCtx bool) bool {
 	branches := schemaBranches(v)
 	if len(branches) == 0 {
 		return false
@@ -144,15 +155,54 @@ func (e *constraintEval) searchEveryBranch(v any, kind constraintKind, depth int
 		return true
 	}
 	for _, child := range viable {
-		if !e.search(child, kind, depth+1) {
+		if !e.searchCtx(child, kind, depth+1, arrayCtx) {
 			return false
 		}
 	}
 	return true
 }
 
-func (e *constraintEval) searchArrayItems(node map[string]any, kind constraintKind, depth int) bool {
-	if !arrayConstraintApplies(node) {
+// allOfForcesArray reports whether an allOf conjunction accepts only arrays
+// (modulo non-viable types such as null): the parent declares array-only, or
+// any branch does. Every accepted instance then satisfies that conjunct, so
+// sibling item keywords constrain all of them.
+func allOfForcesArray(parent map[string]any, branches []schemaNode) bool {
+	if declaresArrayOnly(parent) {
+		return true
+	}
+	for _, b := range branches {
+		if b.kind != schemaObject {
+			continue
+		}
+		if declaresArrayOnly(b.obj) {
+			return true
+		}
+	}
+	return false
+}
+
+// declaresArrayOnly reports whether a type declaration allows arrays but no
+// viable non-array scalar (for example "array" or ["array","null"]).
+func declaresArrayOnly(obj map[string]any) bool {
+	types, ok := declaredTypes(obj)
+	if !ok {
+		return false
+	}
+	hasArray := false
+	for _, t := range types {
+		if t == "array" {
+			hasArray = true
+			continue
+		}
+		if acceptsStringLikeValue([]string{t}) {
+			return false
+		}
+	}
+	return hasArray
+}
+
+func (e *constraintEval) searchArrayItems(node map[string]any, kind constraintKind, depth int, arrayCtx bool) bool {
+	if !arrayConstraintAppliesCtx(node, arrayCtx) {
 		return false
 	}
 	prefix, hasPrefix := node["prefixItems"].([]any)
@@ -176,11 +226,21 @@ func (e *constraintEval) searchArrayItems(node map[string]any, kind constraintKi
 			return false
 		}
 		child, ok := asSchema(add)
-		return ok && e.search(child, kind, depth+1)
+		if !ok {
+			return false
+		}
+		// A tail that cannot carry the value kind constrains it vacuously.
+		if !e.viableForKind(child, kind, depth+1) {
+			return true
+		}
+		return e.search(child, kind, depth+1)
 	default:
 		child, ok := asSchema(items)
 		if !ok {
 			return false
+		}
+		if !e.viableForKind(child, kind, depth+1) {
+			return true
 		}
 		return e.search(child, kind, depth+1)
 	}
@@ -188,13 +248,22 @@ func (e *constraintEval) searchArrayItems(node map[string]any, kind constraintKi
 
 func (e *constraintEval) searchEveryItemList(items []any, kind constraintKind, depth int) bool {
 	if len(items) == 0 {
-		return false
+		return true
 	}
+	var viable []schemaNode
 	for _, item := range items {
 		child, ok := asSchema(item)
 		if !ok {
 			return false
 		}
+		if e.viableForKind(child, kind, depth+1) {
+			viable = append(viable, child)
+		}
+	}
+	if len(viable) == 0 {
+		return true
+	}
+	for _, child := range viable {
 		if !e.search(child, kind, depth+1) {
 			return false
 		}
@@ -202,26 +271,23 @@ func (e *constraintEval) searchEveryItemList(items []any, kind constraintKind, d
 	return true
 }
 
-func arrayConstraintApplies(node map[string]any) bool {
-	types, ok := declaredTypes(node)
+func arrayConstraintAppliesCtx(node map[string]any, arrayCtx bool) bool {
+	_, ok := declaredTypes(node)
 	if !ok {
 		// Untyped nodes still accept scalar strings, so items/prefixItems
-		// keywords do not constrain the argument.
+		// keywords do not constrain the argument — unless an enclosing
+		// allOf conjunction already forces array-only typing, in which
+		// case every accepted instance is an array.
+		if arrayCtx {
+			_, hasItems := node["items"]
+			_, hasPrefix := node["prefixItems"]
+			return hasItems || hasPrefix
+		}
 		return false
 	}
-	hasArray := false
-	for _, t := range types {
-		if t == "array" {
-			hasArray = true
-			continue
-		}
-		if acceptsStringLikeValue([]string{t}) {
-			// A viable non-array scalar (string, object, unknown, or a
-			// union containing one) is unaffected by item constraints.
-			return false
-		}
-	}
-	if !hasArray {
+	if !declaresArrayOnly(node) {
+		// A viable non-array scalar (string, object, unknown, or a union
+		// containing one) is unaffected by item constraints.
 		return false
 	}
 	if _, ok := node["items"]; ok {
@@ -512,13 +578,47 @@ func patternConstrainsURL(pat string) bool {
 	if isVacuousPattern(pat) {
 		return false
 	}
+	if !isAnchoredPattern(pat) {
+		// JSON Schema patterns are unanchored substring searches, so a
+		// marker like "https?" also matches values such as
+		// "file:///tmp/http". Only an anchored pattern actually constrains
+		// the scheme or host.
+		return false
+	}
 	low := strings.ToLower(pat)
 	return strings.Contains(low, "http") || strings.Contains(low, "://") || strings.Contains(low, "scheme")
 }
 
+// isAnchoredPattern reports whether pat anchors its match at the start of
+// the value, tolerating leading inline flag groups such as "(?i)".
+func isAnchoredPattern(pat string) bool {
+	rest := strings.TrimSpace(pat)
+	for strings.HasPrefix(rest, "(?") {
+		end := strings.Index(rest, ")")
+		if end < 0 {
+			return false
+		}
+		rest = rest[end+1:]
+	}
+	return strings.HasPrefix(rest, "^")
+}
+
 func isVacuousPattern(pat string) bool {
-	switch strings.TrimSpace(pat) {
-	case "", ".*", ".+", "^.*$", "^.+$", "(?s).*", "(?s).+", `^[\s\S]*$`, `^[\s\S]+$`:
+	s := strings.TrimSpace(pat)
+	for strings.HasPrefix(s, "(?") {
+		end := strings.Index(s, ")")
+		if end < 0 {
+			break
+		}
+		s = strings.TrimSpace(s[end+1:])
+	}
+	switch s {
+	case "", ".*", ".+", "^", "$",
+		"^.*", "^.+", ".*$", ".+$", "^.*$", "^.+$",
+		`[\s\S]*`, `[\s\S]+`, `^[\s\S]*`, `^[\s\S]+`,
+		`[\s\S]*$`, `[\s\S]+$`, `^[\s\S]*$`, `^[\s\S]+$`,
+		`[\w\W]*`, `[\w\W]+`, `^[\w\W]*`, `^[\w\W]+`,
+		`[\w\W]*$`, `[\w\W]+$`, `^[\w\W]*$`, `^[\w\W]+$`:
 		return true
 	default:
 		return false

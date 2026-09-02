@@ -465,6 +465,56 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"$ref":"#/$defs/%ZZ"}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
+		{
+			name:    "unanchored url pattern still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"https?"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "flagged anchored url pattern stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"(?i)^https://"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "start-only wildcard path pattern still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^.*"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+		{
+			name:    "start-only wildcard command pattern still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"command":{"type":"string","pattern":"^.*"}}}}`),
+			present: []locCat{{CategoryUnconstrainedCommand, cmdLoc}},
+		},
+		{
+			name:    "end-only wildcard path pattern still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":".*$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+		{
+			name:    "encoded slash ref resolves to nested target",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"$ref":"#/$defs/foo%2Fbar"}},"$defs":{"foo/bar":{"enum":["https://example.invalid"]},"foo":{"bar":{"type":"string"}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "allOf split array type and items enum stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"allOf":[{"type":"array"},{"items":{"enum":["https://safe.invalid"]}}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "allOf parent array type with items branch stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","allOf":[{"items":{"enum":["https://safe.invalid"]}}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "closed tuple with non-viable slot stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"enum":["https://safe.invalid"]},{"type":"boolean"}],"items":false}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:    "closed tuple with viable plain slot still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"string"}],"items":false}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -552,6 +602,8 @@ func TestResolveLocalRefPercentDecoding(t *testing.T) {
 			"with space":       map[string]any{"type": "string"},
 			"with space/slash": map[string]any{"type": "string"},
 			"a%b":              map[string]any{"type": "string"},
+			"foo":              map[string]any{"bar": map[string]any{"type": "string"}},
+			"foo/bar":          map[string]any{"type": "string"},
 		},
 	}
 	for _, tt := range []struct{ ref, key string }{
@@ -563,6 +615,24 @@ func TestResolveLocalRefPercentDecoding(t *testing.T) {
 		if !ok || n.kind != schemaObject {
 			t.Fatalf("%s: node=%+v ok=%v", tt.ref, n, ok)
 		}
+	}
+	// An encoded slash is a token separator per RFC 6901 section 6, so it
+	// resolves to the nested target rather than the literal "foo/bar" key.
+	n, ok := resolveLocalRef(root, "#/$defs/foo%2Fbar")
+	if !ok || n.kind != schemaObject || n.obj["type"] != "string" {
+		t.Fatalf("#/$defs/foo%%2Fbar: node=%+v ok=%v", n, ok)
+	}
+	literalOnly := map[string]any{
+		"$defs": map[string]any{
+			"foo/bar": map[string]any{"type": "string"},
+		},
+	}
+	if _, ok := resolveLocalRef(literalOnly, "#/$defs/foo%2Fbar"); ok {
+		t.Fatal("encoded slash must not resolve a literal slash key")
+	}
+	// The literal slash key remains reachable via its ~1 escape.
+	if _, ok := resolveLocalRef(literalOnly, "#/$defs/foo~1bar"); !ok {
+		t.Fatal("tilde escape must still resolve a literal slash key")
 	}
 	if _, ok := resolveLocalRef(root, "#/$defs/%ZZ"); ok {
 		t.Fatal("invalid percent-encoding must not resolve")

@@ -302,7 +302,14 @@ func localJSONPointer(ref string) (string, bool) {
 		return "", true
 	}
 	if strings.HasPrefix(ref, "#/") {
-		return ref[1:], true
+		// RFC 6901 section 6: the URI fragment is percent-decoded before
+		// JSON Pointer tokenization, so an encoded slash (%2F) is a token
+		// separator. A literal slash inside a key is written ~1 instead.
+		decoded, err := url.PathUnescape(ref[1:])
+		if err != nil {
+			return "", false
+		}
+		return decoded, true
 	}
 	return "", false
 }
@@ -316,11 +323,7 @@ func evalJSONPointer(root map[string]any, pointer string) (schemaNode, bool) {
 	}
 	var cur any = root
 	for _, part := range strings.Split(pointer, "/")[1:] {
-		unescaped, err := url.PathUnescape(part)
-		if err != nil {
-			return schemaNode{}, false
-		}
-		token := decodeJSONPointerToken(unescaped)
+		token := decodeJSONPointerToken(part)
 		next, ok := jsonPointerStep(cur, token)
 		if !ok {
 			return schemaNode{}, false
