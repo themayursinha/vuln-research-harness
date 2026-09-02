@@ -59,6 +59,11 @@ type walkFrame struct {
 	loc      string
 	propName string
 	depth    int
+	// inspect asks enter to surface composition-branch cues at cueLoc/cueName
+	// (the logical property) instead of at the physical composition path.
+	inspect bool
+	cueLoc  string
+	cueName string
 }
 
 func (f walkFrame) constraint() schemaNode {
@@ -66,6 +71,13 @@ func (f walkFrame) constraint() schemaNode {
 		return f.origin
 	}
 	return f.node
+}
+
+func (f walkFrame) cueSite() (loc, name string) {
+	if f.inspect && f.cueLoc != "" {
+		return f.cueLoc, f.cueName
+	}
+	return f.loc, f.propName
 }
 
 type schemaWalker struct {
@@ -107,9 +119,7 @@ func (w *schemaWalker) enter(f walkFrame, callVisit bool) {
 	switch f.node.kind {
 	case schemaFalse, schemaTrue:
 		w.visited++
-		if callVisit {
-			w.visit(f.loc, f.propName, f.node, f.constraint())
-		}
+		w.visitFrame(f, callVisit)
 		return
 	case schemaObject:
 	default:
@@ -125,11 +135,20 @@ func (w *schemaWalker) enter(f walkFrame, callVisit bool) {
 		defer delete(w.active, id)
 	}
 	w.visited++
-	if callVisit {
-		w.visit(f.loc, f.propName, f.node, f.constraint())
-	}
+	w.visitFrame(f, callVisit)
 	w.followRef(obj, f, callVisit)
 	w.walkApplicators(obj, f, callVisit)
+}
+
+func (w *schemaWalker) visitFrame(f walkFrame, callVisit bool) {
+	if callVisit {
+		w.visit(f.loc, f.propName, f.node, f.constraint())
+		return
+	}
+	if f.inspect {
+		cueLoc, cueName := f.cueSite()
+		w.visit(cueLoc, cueName, f.node, f.constraint())
+	}
 }
 
 func (w *schemaWalker) followRef(obj map[string]any, f walkFrame, callVisit bool) {
@@ -151,6 +170,9 @@ func (w *schemaWalker) followRef(obj map[string]any, f walkFrame, callVisit bool
 		loc:      f.loc,
 		propName: f.propName,
 		depth:    f.depth + 1,
+		inspect:  f.inspect,
+		cueLoc:   f.cueLoc,
+		cueName:  f.cueName,
 	}, callVisit)
 	delete(w.activeRefs, ref)
 }
@@ -215,19 +237,25 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 		if !ok {
 			continue
 		}
+		inspect := inspectBranches || f.inspect
+		cueLoc, cueName := f.loc, f.propName
+		if f.inspect && f.cueLoc != "" {
+			cueLoc, cueName = f.cueLoc, f.cueName
+		}
 		for i, item := range arr {
 			child, ok := asSchema(item)
 			if !ok {
 				continue
 			}
-			if inspectBranches {
-				w.visit(f.loc, f.propName, child, f.constraint())
-			}
 			w.enter(walkFrame{
 				node:     child,
+				origin:   f.constraint(),
 				loc:      fmt.Sprintf("%s.%s[%d]", loc, key, i),
 				propName: "",
 				depth:    depth + 1,
+				inspect:  inspect,
+				cueLoc:   cueLoc,
+				cueName:  cueName,
 			}, false)
 		}
 	}

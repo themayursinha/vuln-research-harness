@@ -158,6 +158,128 @@ func TestReviewConstrainedArgumentsProduceNoMatchingHypothesis(t *testing.T) {
 	}
 }
 
+func TestReviewIncompatibleTypedNameCues(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantCat string
+		wantLoc string
+		absent  string
+	}{
+		{
+			name:   "boolean url name is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"boolean"}}}}`),
+			absent: CategoryUnconstrainedURL,
+		},
+		{
+			name:   "number url name is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"number"}}}}`),
+			absent: CategoryUnconstrainedURL,
+		},
+		{
+			name:   "integer path name is not a path argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"integer"}}}}`),
+			absent: CategoryUnconstrainedPath,
+		},
+		{
+			name:   "null command name is not a command argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"command":{"type":"null"}}}}`),
+			absent: CategoryUnconstrainedCommand,
+		},
+		{
+			name:    "string url name still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string"}}}}`),
+			wantCat: CategoryUnconstrainedURL,
+			wantLoc: "inputSchema.properties.url",
+		},
+		{
+			name:    "untyped url name still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{}}}}`),
+			wantCat: CategoryUnconstrainedURL,
+			wantLoc: "inputSchema.properties.url",
+		},
+		{
+			name:   "boolean type via local ref is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"$ref":"#/$defs/Flag"}},"$defs":{"Flag":{"type":"boolean"}}}}`),
+			absent: CategoryUnconstrainedURL,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rep := mustReview(t, tt.input)
+			if tt.absent != "" {
+				if hasCategory(rep, tt.absent) {
+					t.Fatalf("incompatible type produced %s: %+v", tt.absent, rep.Hypotheses)
+				}
+				return
+			}
+			h := findHypothesis(rep, tt.wantCat, tt.wantLoc)
+			if h == nil {
+				t.Fatalf("missing %s at %s in %+v", tt.wantCat, tt.wantLoc, rep.Hypotheses)
+			}
+			assertHypothesisTriage(t, *h)
+		})
+	}
+}
+
+func TestReviewArrayItemConstraints(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantCat string
+		wantLoc string
+		absent  string
+	}{
+		{
+			name:   "urls array items enum of allowed URLs",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","items":{"type":"string","enum":["https://example.invalid"]}}}}}`),
+			absent: CategoryUnconstrainedURL,
+		},
+		{
+			name:    "urls array items plain string",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","items":{"type":"string"}}}}}`),
+			wantCat: CategoryUnconstrainedURL,
+			wantLoc: "inputSchema.properties.urls",
+		},
+		{
+			name:   "webhooks array items enum",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"webhooks":{"type":"array","items":{"type":"string","enum":["https://example.invalid/hook"]}}}}}`),
+			absent: CategoryUnconstrainedURL,
+		},
+		{
+			name:   "paths array items enum",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"paths":{"type":"array","items":{"type":"string","enum":["/tmp/sandbox/a"]}}}}}`),
+			absent: CategoryUnconstrainedPath,
+		},
+		{
+			name:   "commands array items enum",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"commands":{"type":"array","items":{"enum":["status"]}}}}}`),
+			absent: CategoryUnconstrainedCommand,
+		},
+		{
+			name:   "urls array items enum via local ref",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","items":{"$ref":"#/$defs/Allowed"}}},"$defs":{"Allowed":{"type":"string","enum":["https://example.invalid"]}}}}`),
+			absent: CategoryUnconstrainedURL,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rep := mustReview(t, tt.input)
+			if tt.absent != "" {
+				if hasCategory(rep, tt.absent) {
+					t.Fatalf("constrained array items produced %s: %+v", tt.absent, rep.Hypotheses)
+				}
+				return
+			}
+			h := findHypothesis(rep, tt.wantCat, tt.wantLoc)
+			if h == nil {
+				t.Fatalf("missing %s at %s in %+v", tt.wantCat, tt.wantLoc, rep.Hypotheses)
+			}
+			assertHypothesisTriage(t, *h)
+		})
+	}
+}
+
 func TestReviewPluralArgumentNames(t *testing.T) {
 	tests := []struct {
 		name    string

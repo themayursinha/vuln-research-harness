@@ -37,6 +37,19 @@ func (e *constraintEval) has(node schemaNode, kind constraintKind) bool {
 	return e.search(node, kind, 0)
 }
 
+// unconstrained reports whether node/origin can carry a string-like value of
+// kind and lacks a constraint. Incompatible declared types (boolean, number,
+// integer, null) suppress emission even when the property name cues kind.
+func (e *constraintEval) unconstrained(node, origin schemaNode, kind constraintKind) bool {
+	if !e.viableForKind(origin, kind, 0) {
+		return false
+	}
+	if !e.viableForKind(node, kind, 0) {
+		return false
+	}
+	return !e.has(origin, kind)
+}
+
 func (e *constraintEval) search(node schemaNode, kind constraintKind, depth int) bool {
 	if node.kind == schemaInvalid {
 		return false
@@ -70,6 +83,9 @@ func (e *constraintEval) search(node schemaNode, kind constraintKind, depth int)
 	}
 	if !found {
 		found = e.searchComposition(obj, kind, depth)
+	}
+	if !found {
+		found = e.searchArrayItems(obj, kind, depth)
 	}
 	delete(e.active, id)
 	if found {
@@ -133,6 +149,73 @@ func (e *constraintEval) searchEveryBranch(v any, kind constraintKind, depth int
 		}
 	}
 	return true
+}
+
+func (e *constraintEval) searchArrayItems(node map[string]any, kind constraintKind, depth int) bool {
+	if !arrayConstraintApplies(node) {
+		return false
+	}
+	prefix, hasPrefix := node["prefixItems"].([]any)
+	if hasPrefix {
+		if !e.searchEveryItemList(prefix, kind, depth) {
+			return false
+		}
+		if _, hasItems := node["items"]; !hasItems {
+			return false
+		}
+	}
+	switch items := node["items"].(type) {
+	case nil:
+		return false
+	case []any:
+		if !e.searchEveryItemList(items, kind, depth) {
+			return false
+		}
+		add, ok := node["additionalItems"]
+		if !ok {
+			return false
+		}
+		child, ok := asSchema(add)
+		return ok && e.search(child, kind, depth+1)
+	default:
+		child, ok := asSchema(items)
+		if !ok {
+			return false
+		}
+		return e.search(child, kind, depth+1)
+	}
+}
+
+func (e *constraintEval) searchEveryItemList(items []any, kind constraintKind, depth int) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		child, ok := asSchema(item)
+		if !ok {
+			return false
+		}
+		if !e.search(child, kind, depth+1) {
+			return false
+		}
+	}
+	return true
+}
+
+func arrayConstraintApplies(node map[string]any) bool {
+	if types, ok := declaredTypes(node); ok {
+		for _, t := range types {
+			if t == "array" {
+				return true
+			}
+		}
+		return false
+	}
+	if _, ok := node["items"]; ok {
+		return true
+	}
+	_, ok := node["prefixItems"]
+	return ok
 }
 
 func (e *constraintEval) viableForKind(node schemaNode, kind constraintKind, depth int) bool {

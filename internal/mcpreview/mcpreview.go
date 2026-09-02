@@ -168,7 +168,7 @@ func reviewTool(rep *reporter, name, description string, schema map[string]any) 
 				})
 			}
 		}
-		if cue, ok := urlCue(propName, keywords); ok && !eval.has(origin, constraintURL) {
+		if cue, ok := urlCue(propName, keywords); ok && eval.unconstrained(node, origin, constraintURL) {
 			rep.add(Hypothesis{
 				ToolName:    name,
 				Category:    CategoryUnconstrainedURL,
@@ -177,7 +177,7 @@ func reviewTool(rep *reporter, name, description string, schema map[string]any) 
 				Rationale:   "URL-like argument has no scheme, host, or enum constraint (research triage, not a confirmed vulnerability).",
 			})
 		}
-		if cue, ok := pathCue(propName, keywords); ok && !eval.has(origin, constraintPath) {
+		if cue, ok := pathCue(propName, keywords); ok && eval.unconstrained(node, origin, constraintPath) {
 			rep.add(Hypothesis{
 				ToolName:    name,
 				Category:    CategoryUnconstrainedPath,
@@ -186,7 +186,7 @@ func reviewTool(rep *reporter, name, description string, schema map[string]any) 
 				Rationale:   "Path-like argument has no root, pattern, or enum constraint (research triage, not a confirmed vulnerability).",
 			})
 		}
-		if cue, ok := commandCue(propName, keywords); ok && !eval.has(origin, constraintCommand) {
+		if cue, ok := commandCue(propName, keywords); ok && eval.unconstrained(node, origin, constraintCommand) {
 			rep.add(Hypothesis{
 				ToolName:    name,
 				Category:    CategoryUnconstrainedCommand,

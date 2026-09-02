@@ -384,6 +384,17 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"target":{"anyOf":[{"type":"string","format":"uri-reference"}]}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.target"}},
 		},
+		{
+			name:    "nested allOf format uri cue is at the property location",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"target":{"allOf":[{"allOf":[{"type":"string","format":"uri"}]}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.target"}},
+			absent:  []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.target.allOf[0]"}, {CategoryUnconstrainedURL, "inputSchema.properties.target.allOf[0].allOf[0]"}},
+		},
+		{
+			name:    "three-level nested anyOf boundary description is at the property location",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"target":{"anyOf":[{"anyOf":[{"anyOf":[{"type":"string","description":"Reads files from disk"}]}]}]}}}}`),
+			present: []locCat{{CategoryBoundaryDescription, "inputSchema.properties.target.description"}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
