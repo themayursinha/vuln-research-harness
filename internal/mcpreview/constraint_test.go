@@ -395,6 +395,76 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"target":{"anyOf":[{"anyOf":[{"anyOf":[{"type":"string","description":"Reads files from disk"}]}]}]}}}}`),
 			present: []locCat{{CategoryBoundaryDescription, "inputSchema.properties.target.description"}},
 		},
+		{
+			name:    "untyped urls items enum still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"items":{"enum":["https://safe.invalid"]}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:    "urls array plus string union items enum still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":["array","string"],"items":{"enum":["https://safe.invalid"]}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "urls array plus null union items enum stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":["array","null"],"items":{"enum":["https://safe.invalid"]}}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "url allOf boolean is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"allOf":[{"type":"boolean"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "url anyOf all non-viable is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"anyOf":[{"type":"boolean"},{"type":"null"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "url oneOf all non-viable is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"oneOf":[{"type":"boolean"},{"type":"integer"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "url allOf via local ref to boolean is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"allOf":[{"$ref":"#/$defs/Flag"}]}},"$defs":{"Flag":{"type":"boolean"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "url ref to allOf boolean is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"$ref":"#/$defs/W"}},"$defs":{"W":{"allOf":[{"type":"boolean"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "urls array boolean items is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","items":{"type":"boolean"}}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "urls array closed boolean prefix is not a URL argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"boolean"}],"items":false}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:    "urls array open boolean prefix still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"boolean"}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "url constrained via percent-encoded local ref",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"$ref":"#/$defs/with%20space"}},"$defs":{"with space":{"type":"string","enum":["https://example.invalid"]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "url constrained via percent plus tilde-escaped local ref",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"$ref":"#/$defs/with%20space~1slash"}},"$defs":{"with space/slash":{"enum":["https://example.invalid"]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "invalid percent-encoding is not a constraint",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"$ref":"#/$defs/%ZZ"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -473,6 +543,32 @@ func TestResolveLocalRefBooleanObjectAndNonSchema(t *testing.T) {
 	}
 	if _, ok := resolveLocalRef(root, "#HttpsURL"); ok {
 		t.Fatal("anchor ref must not resolve")
+	}
+}
+
+func TestResolveLocalRefPercentDecoding(t *testing.T) {
+	root := map[string]any{
+		"$defs": map[string]any{
+			"with space":       map[string]any{"type": "string"},
+			"with space/slash": map[string]any{"type": "string"},
+			"a%b":              map[string]any{"type": "string"},
+		},
+	}
+	for _, tt := range []struct{ ref, key string }{
+		{ref: "#/$defs/with%20space", key: "with space"},
+		{ref: "#/$defs/with%20space~1slash", key: "with space/slash"},
+		{ref: "#/$defs/a%25b", key: "a%b"},
+	} {
+		n, ok := resolveLocalRef(root, tt.ref)
+		if !ok || n.kind != schemaObject {
+			t.Fatalf("%s: node=%+v ok=%v", tt.ref, n, ok)
+		}
+	}
+	if _, ok := resolveLocalRef(root, "#/$defs/%ZZ"); ok {
+		t.Fatal("invalid percent-encoding must not resolve")
+	}
+	if _, ok := resolveLocalRef(root, "#/$defs/with%20space%"); ok {
+		t.Fatal("truncated percent-encoding must not resolve")
 	}
 }
 

@@ -203,18 +203,31 @@ func (e *constraintEval) searchEveryItemList(items []any, kind constraintKind, d
 }
 
 func arrayConstraintApplies(node map[string]any) bool {
-	if types, ok := declaredTypes(node); ok {
-		for _, t := range types {
-			if t == "array" {
-				return true
-			}
+	types, ok := declaredTypes(node)
+	if !ok {
+		// Untyped nodes still accept scalar strings, so items/prefixItems
+		// keywords do not constrain the argument.
+		return false
+	}
+	hasArray := false
+	for _, t := range types {
+		if t == "array" {
+			hasArray = true
+			continue
 		}
+		if acceptsStringLikeValue([]string{t}) {
+			// A viable non-array scalar (string, object, unknown, or a
+			// union containing one) is unaffected by item constraints.
+			return false
+		}
+	}
+	if !hasArray {
 		return false
 	}
 	if _, ok := node["items"]; ok {
 		return true
 	}
-	_, ok := node["prefixItems"]
+	_, ok = node["prefixItems"]
 	return ok
 }
 
@@ -235,21 +248,136 @@ func (e *constraintEval) viableForKind(node schemaNode, kind constraintKind, dep
 	if types, ok := declaredTypes(obj); ok && !acceptsStringLikeValue(types) {
 		return false
 	}
-	ref, ok := obj["$ref"].(string)
-	if !ok {
+	// allOf is a conjunction: any non-viable branch makes the whole
+	// non-viable (e.g. {"allOf":[{"type":"boolean"}]} accepts only booleans).
+	if branches := schemaBranches(obj["allOf"]); len(branches) > 0 {
+		for _, b := range branches {
+			if !e.viableForKind(b, kind, depth+1) {
+				return false
+			}
+		}
+	}
+	// anyOf/oneOf are conjunctions with the rest of the schema: an
+	// all-non-viable disjunction restricts the whole to non-viable values.
+	for _, key := range []string{"anyOf", "oneOf"} {
+		if _, present := obj[key]; !present {
+			continue
+		}
+		branches := schemaBranches(obj[key])
+		if len(branches) == 0 {
+			continue
+		}
+		viable := false
+		for _, b := range branches {
+			if e.viableForKind(b, kind, depth+1) {
+				viable = true
+				break
+			}
+		}
+		if !viable {
+			return false
+		}
+	}
+	if ref, ok := obj["$ref"].(string); ok {
+		if _, looping := e.activeRefs[ref]; !looping {
+			if target, ok := resolveLocalRef(e.root, ref); ok {
+				e.activeRefs[ref] = struct{}{}
+				viable := e.viableForKind(target, kind, depth+1)
+				delete(e.activeRefs, ref)
+				if !viable {
+					return false
+				}
+			}
+		}
+	}
+	if !e.arrayElementsViable(obj, kind, depth) {
+		return false
+	}
+	return true
+}
+
+// arrayElementsViable reports whether an array-only node can hold a
+// string-like element. Nodes that also accept a viable non-array scalar
+// stay viable via that scalar; untyped nodes stay viable as well. Only
+// array-only nodes (modulo non-viable types like null) are gated on their
+// applicable item schemas.
+func (e *constraintEval) arrayElementsViable(obj map[string]any, kind constraintKind, depth int) bool {
+	types, hasTypes := declaredTypes(obj)
+	if !hasTypes {
 		return true
 	}
-	if _, looping := e.activeRefs[ref]; looping {
+	hasArray := false
+	for _, t := range types {
+		if t == "array" {
+			hasArray = true
+			continue
+		}
+		if acceptsStringLikeValue([]string{t}) {
+			return true
+		}
+	}
+	if !hasArray {
 		return true
 	}
-	target, ok := resolveLocalRef(e.root, ref)
-	if !ok {
+	_, hasItems := obj["items"]
+	_, hasPrefix := obj["prefixItems"]
+	if !hasItems && !hasPrefix {
 		return true
 	}
-	e.activeRefs[ref] = struct{}{}
-	viable := e.viableForKind(target, kind, depth+1)
-	delete(e.activeRefs, ref)
-	return viable
+	if depth+1 >= maxConstraintDepth {
+		return true
+	}
+	if prefix, ok := obj["prefixItems"].([]any); ok {
+		for _, item := range prefix {
+			child, ok := asSchema(item)
+			if !ok {
+				return true
+			}
+			if e.viableForKind(child, kind, depth+1) {
+				return true
+			}
+		}
+		if _, hasItems := obj["items"]; !hasItems {
+			// prefixItems alone leaves additional positions open.
+			return true
+		}
+	} else if hasPrefix {
+		// Malformed prefixItems is ignored conservatively.
+		return true
+	}
+	switch items := obj["items"].(type) {
+	case nil:
+		// Null or absent tail schema alongside a fully non-viable prefix
+		// list is unreachable via the open-tail returns above; stay
+		// conservative and treat it as viable.
+		return true
+	case []any:
+		for _, item := range items {
+			child, ok := asSchema(item)
+			if !ok {
+				return true
+			}
+			if e.viableForKind(child, kind, depth+1) {
+				return true
+			}
+		}
+		add, ok := obj["additionalItems"]
+		if !ok {
+			// Legacy tuple form without additionalItems allows extras.
+			return true
+		}
+		child, ok := asSchema(add)
+		if !ok {
+			return true
+		}
+		return e.viableForKind(child, kind, depth+1)
+	default:
+		child, ok := asSchema(items)
+		if !ok {
+			return true
+		}
+		return e.viableForKind(child, kind, depth+1)
+	}
 }
 
 func declaredTypes(obj map[string]any) ([]string, bool) {

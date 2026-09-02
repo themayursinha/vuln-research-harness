@@ -2,6 +2,7 @@ package mcpreview
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -315,7 +316,11 @@ func evalJSONPointer(root map[string]any, pointer string) (schemaNode, bool) {
 	}
 	var cur any = root
 	for _, part := range strings.Split(pointer, "/")[1:] {
-		token := decodeJSONPointerToken(part)
+		unescaped, err := url.PathUnescape(part)
+		if err != nil {
+			return schemaNode{}, false
+		}
+		token := decodeJSONPointerToken(unescaped)
 		next, ok := jsonPointerStep(cur, token)
 		if !ok {
 			return schemaNode{}, false
