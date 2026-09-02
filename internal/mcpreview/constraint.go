@@ -118,12 +118,94 @@ func (e *constraintEval) searchEveryBranch(v any, kind constraintKind, depth int
 	if len(branches) == 0 {
 		return false
 	}
+	var viable []schemaNode
 	for _, child := range branches {
+		if e.viableForKind(child, kind, depth+1) {
+			viable = append(viable, child)
+		}
+	}
+	if len(viable) == 0 {
+		return true
+	}
+	for _, child := range viable {
 		if !e.search(child, kind, depth+1) {
 			return false
 		}
 	}
 	return true
+}
+
+func (e *constraintEval) viableForKind(node schemaNode, kind constraintKind, depth int) bool {
+	if depth >= maxConstraintDepth {
+		return true
+	}
+	switch node.kind {
+	case schemaTrue:
+		return true
+	case schemaFalse, schemaInvalid:
+		return false
+	}
+	obj := node.obj
+	if obj == nil {
+		return true
+	}
+	if types, ok := declaredTypes(obj); ok && !acceptsStringLikeValue(types) {
+		return false
+	}
+	ref, ok := obj["$ref"].(string)
+	if !ok {
+		return true
+	}
+	if _, looping := e.activeRefs[ref]; looping {
+		return true
+	}
+	target, ok := resolveLocalRef(e.root, ref)
+	if !ok {
+		return true
+	}
+	e.activeRefs[ref] = struct{}{}
+	viable := e.viableForKind(target, kind, depth+1)
+	delete(e.activeRefs, ref)
+	return viable
+}
+
+func declaredTypes(obj map[string]any) ([]string, bool) {
+	switch t := obj["type"].(type) {
+	case string:
+		if t == "" {
+			return nil, false
+		}
+		return []string{t}, true
+	case []any:
+		var types []string
+		for _, item := range t {
+			s, ok := item.(string)
+			if !ok || s == "" {
+				continue
+			}
+			types = append(types, s)
+		}
+		if len(types) == 0 {
+			return nil, false
+		}
+		return types, true
+	default:
+		return nil, false
+	}
+}
+
+func acceptsStringLikeValue(types []string) bool {
+	for _, t := range types {
+		switch t {
+		case "string", "array", "object":
+			return true
+		case "null", "boolean", "number", "integer":
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func schemaBranches(v any) []schemaNode {

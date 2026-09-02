@@ -96,6 +96,9 @@ func tokenInSet(tok string, set map[string]struct{}) bool {
 }
 
 func singularToken(tok string) string {
+	if len(tok) > 3 && strings.HasSuffix(tok, "ies") {
+		return tok[:len(tok)-3] + "y"
+	}
 	if len(tok) > 1 && strings.HasSuffix(tok, "s") {
 		return tok[:len(tok)-1]
 	}

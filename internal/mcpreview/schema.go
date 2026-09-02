@@ -129,7 +129,7 @@ func (w *schemaWalker) enter(f walkFrame, callVisit bool) {
 		w.visit(f.loc, f.propName, f.node, f.constraint())
 	}
 	w.followRef(obj, f, callVisit)
-	w.walkApplicators(obj, f.loc, f.depth)
+	w.walkApplicators(obj, f, callVisit)
 }
 
 func (w *schemaWalker) followRef(obj map[string]any, f walkFrame, callVisit bool) {
@@ -155,7 +155,9 @@ func (w *schemaWalker) followRef(obj map[string]any, f walkFrame, callVisit bool
 	delete(w.activeRefs, ref)
 }
 
-func (w *schemaWalker) walkApplicators(obj map[string]any, loc string, depth int) {
+func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectBranches bool) {
+	loc := f.loc
+	depth := f.depth
 	if props, ok := asObject(obj["properties"]); ok {
 		for _, name := range sortedKeys(props) {
 			child, ok := asSchema(props[name])
@@ -217,6 +219,9 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, loc string, depth int
 			child, ok := asSchema(item)
 			if !ok {
 				continue
+			}
+			if inspectBranches {
+				w.visit(f.loc, f.propName, child, f.constraint())
 			}
 			w.enter(walkFrame{
 				node:     child,

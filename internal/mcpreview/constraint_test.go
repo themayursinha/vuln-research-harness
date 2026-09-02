@@ -338,6 +338,52 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"allOf":[{"type":"string"},{"enum":["https://example.invalid"]}]}}}}`),
 			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
+		{
+			name:   "anyOf constrained string plus null is constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"anyOf":[{"type":"string","enum":["https://example.invalid"]},{"type":"null"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "oneOf constrained string plus null is constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"oneOf":[{"type":"string","const":"https://example.invalid"},{"type":"null"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "anyOf constrained string plus boolean is constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"anyOf":[{"enum":["https://example.invalid"]},{"type":"boolean"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "anyOf constrained ref plus null ref is constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"anyOf":[{"$ref":"#/$defs/HttpsURL"},{"$ref":"#/$defs/Null"}]}},"$defs":{"HttpsURL":{"type":"string","enum":["https://example.invalid"]},"Null":{"type":"null"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "anyOf constrained string plus unconstrained string still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"anyOf":[{"type":"string","enum":["https://example.invalid"]},{"type":"string"}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "nullable unconstrained urls array remains unconstrained",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"anyOf":[{"type":"array","items":{"type":"string"}},{"type":"null"}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:    "format uri cue on allOf branch is at the property location",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"target":{"allOf":[{"type":"string","format":"uri"}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.target"}},
+			absent:  []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.target.allOf[0]"}},
+		},
+		{
+			name:    "boundary description on oneOf branch is at the property location",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"target":{"oneOf":[{"type":"string","description":"Reads files from disk"}]}}}}`),
+			present: []locCat{{CategoryBoundaryDescription, "inputSchema.properties.target.description"}},
+		},
+		{
+			name:    "format uri cue on anyOf branch is at the property location",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"target":{"anyOf":[{"type":"string","format":"uri-reference"}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.target"}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

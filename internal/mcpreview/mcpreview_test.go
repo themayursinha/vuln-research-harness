@@ -183,6 +183,24 @@ func TestReviewPluralArgumentNames(t *testing.T) {
 			wantCat: CategoryUnconstrainedURL,
 			wantLoc: "inputSchema.properties.endpoints",
 		},
+		{
+			name:    "directories array with plain-string items",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"directories":{"type":"array","items":{"type":"string"}}}}}`),
+			wantCat: CategoryUnconstrainedPath,
+			wantLoc: "inputSchema.properties.directories",
+		},
+		{
+			name:    "binaries array with plain-string items",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"binaries":{"type":"array","items":{"type":"string"}}}}}`),
+			wantCat: CategoryUnconstrainedCommand,
+			wantLoc: "inputSchema.properties.binaries",
+		},
+		{
+			name:    "files array still matches via regular plural",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"files":{"type":"array","items":{"type":"string"}}}}}`),
+			wantCat: CategoryUnconstrainedPath,
+			wantLoc: "inputSchema.properties.files",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -193,6 +211,26 @@ func TestReviewPluralArgumentNames(t *testing.T) {
 			}
 			assertHypothesisTriage(t, *h)
 		})
+	}
+}
+
+func TestSingularToken(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{in: "urls", want: "url"},
+		{in: "webhooks", want: "webhook"},
+		{in: "endpoints", want: "endpoint"},
+		{in: "directories", want: "directory"},
+		{in: "binaries", want: "binary"},
+		{in: "libraries", want: "library"},
+		{in: "entries", want: "entry"},
+		{in: "files", want: "file"},
+		{in: "url", want: "url"},
+		{in: "s", want: "s"},
+	}
+	for _, tt := range tests {
+		if got := singularToken(tt.in); got != tt.want {
+			t.Fatalf("singularToken(%q)=%q want %q", tt.in, got, tt.want)
+		}
 	}
 }
 
