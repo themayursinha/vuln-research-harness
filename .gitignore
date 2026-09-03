@@ -27,6 +27,33 @@ campaigns/fixture-lab/**
 !campaigns/fixture-lab/source/public/
 !campaigns/fixture-lab/source/public/config.txt
 
+!campaigns/mcp-filesystem/
+campaigns/mcp-filesystem/**
+!campaigns/mcp-filesystem/.gitignore
+!campaigns/mcp-filesystem/README.md
+!campaigns/mcp-filesystem/Dockerfile
+!campaigns/mcp-filesystem/campaign.yaml
+!campaigns/mcp-filesystem/cases.yaml
+!campaigns/mcp-filesystem/manifest.json
+!campaigns/mcp-filesystem/source.tar.gz
+!campaigns/mcp-filesystem/scripts/
+!campaigns/mcp-filesystem/scripts/repro.mjs
+!campaigns/mcp-filesystem/source/
+!campaigns/mcp-filesystem/source/UPSTREAM.md
+!campaigns/mcp-filesystem/source/LICENSE
+!campaigns/mcp-filesystem/source/package.json
+!campaigns/mcp-filesystem/source/package-lock.json
+!campaigns/mcp-filesystem/source/tsconfig.json
+!campaigns/mcp-filesystem/source/index.ts
+!campaigns/mcp-filesystem/source/lib.ts
+!campaigns/mcp-filesystem/source/path-utils.ts
+!campaigns/mcp-filesystem/source/path-validation.ts
+!campaigns/mcp-filesystem/source/roots-utils.ts
+!campaigns/mcp-filesystem/source/sandbox/
+!campaigns/mcp-filesystem/source/sandbox/public.txt
+!campaigns/mcp-filesystem/source/outside/
+!campaigns/mcp-filesystem/source/outside/secret.txt
+
 # Editor
 *.swp
 .idea/
