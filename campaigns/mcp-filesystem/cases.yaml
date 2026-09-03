@@ -1,0 +1,6 @@
+- id: root-escape-probe
+  finding: H-MCPFS-ROOT-ESCAPE
+  script_path: scripts/repro.mjs
+  interpreter: node
+  marker: MCPFS-ROOT-ESCAPE
+  timeout_seconds: 60

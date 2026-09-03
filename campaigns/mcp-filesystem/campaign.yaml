@@ -1,0 +1,36 @@
+version: v1
+name: mcp-filesystem
+target:
+  name: mcp-filesystem-server
+  source_snapshot: sha256:49664a84251c7235c7a6d2c18ddf3a86044b1fe2183e03c5d5034697f54bd1a6
+  source_path: source
+authorization:
+  owner: local-lab-operator
+  scope: authorized local snapshot of the official MCP filesystem server only
+  written_permission: true
+  evidence: public fixture in vuln-research-harness repository
+attacker:
+  starting_privilege: unauthenticated local protocol client
+  capabilities:
+    - supply filesystem tool paths to the local MCP filesystem server
+  excluded:
+    - real credentials
+    - real user data
+    - external network
+environment:
+  deployment: disposable local container
+  network: denied
+  isolation: digest-pinned container with read-only snapshot mount
+  container_image: localhost/vrh-mcp-filesystem@sha256:3ed6ae3836d02fe0b75e47998503b5bbc582486aadf4e63849995d0aabccd721
+  synthetic_data: true
+  disposable: true
+success:
+  impact: read synthetic secret file outside the configured MCP root via a tool path argument
+  evidence:
+    - reproduction test
+    - repro_outcomes.json
+    - source snapshot digest
+discovery:
+  source_first: true
+  history_restricted: true
+  internet_restricted: true

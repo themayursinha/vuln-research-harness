@@ -2,6 +2,7 @@ package contract
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -43,6 +44,24 @@ func TestLoadParsesYAML(t *testing.T) {
 	}
 	if err := campaign.Validate(); err != nil {
 		t.Fatalf("loaded campaign should validate: %v", err)
+	}
+}
+
+func TestCommittedFixturesValidate(t *testing.T) {
+	paths := []string{
+		filepath.Join("..", "..", "campaigns", "fixture-lab", "campaign.yaml"),
+		filepath.Join("..", "..", "campaigns", "mcp-filesystem", "campaign.yaml"),
+	}
+	for _, path := range paths {
+		t.Run(filepath.ToSlash(path), func(t *testing.T) {
+			campaign, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := campaign.Validate(); err != nil {
+				t.Fatalf("committed campaign should validate: %v", err)
+			}
+		})
 	}
 }
 

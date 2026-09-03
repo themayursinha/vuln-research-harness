@@ -10,10 +10,11 @@ pins the target and success condition, an approach registry that prevents
 premature agent convergence, and an evidence ledger that records every state
 transition from hypothesis to reproduced impact.
 
-**Status: Phase 4 pilot prep.** Phases 1–3 are complete: contract, registry,
+**Status: Phase 4 pilot.** Phases 1–3 are complete: contract, registry,
 ledger, coordinator round loop, container-backed reproduction (`vrh repro`),
-sandbox verification, and adversarial validation. Next: close the evidence
-loop (ledger events, reference fixture), then run a bounded manual pilot.
+sandbox verification, and adversarial validation. Local fixtures exist for a
+synthetic path-join lab and a pinned official filesystem MCP server. Next: a
+bounded four-worker campaign against that MCP fixture, then measurement.
 An automated agent runner and microVM adapter are not built yet.
 See [docs/roadmap.md](docs/roadmap.md) and [docs/campaigns.md](docs/campaigns.md).
 
@@ -94,6 +95,7 @@ vrh round ingest ./campaigns/mcp-filesystem-server
 ```
 cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox, campaign status)
 campaigns/fixture-lab/  reference synthetic campaign (see README there)
+campaigns/mcp-filesystem/  official filesystem MCP server, local fixture (see README there)
 internal/contract/  campaign contract load/validate (YAML, digest-pinned)
 internal/registry/  approach family registry (convergence + blocked-path state)
 internal/ledger/    append-only evidence ledger (JSONL, hash-linked)

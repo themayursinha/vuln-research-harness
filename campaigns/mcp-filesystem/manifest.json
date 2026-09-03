@@ -1,0 +1,63 @@
+{
+  "target": "source",
+  "created_at": "2026-09-03T06:48:28Z",
+  "archive_sha256": "49664a84251c7235c7a6d2c18ddf3a86044b1fe2183e03c5d5034697f54bd1a6",
+  "file_count": 11,
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a",
+      "size": 12227
+    },
+    {
+      "path": "UPSTREAM.md",
+      "sha256": "5ebc9ae215fd48ff6e5a5fa190e649dabcc8623265fe292b3ef4ea9c99bdb20d",
+      "size": 784
+    },
+    {
+      "path": "index.ts",
+      "sha256": "bff21de612c59d64b351f70615f44563f0efe76666a75aa52450ebe6fae6584a",
+      "size": 28547
+    },
+    {
+      "path": "lib.ts",
+      "sha256": "d67db7074d9823a306e83326a4362e477e0ff7492fb484e015a15abad761b495",
+      "size": 17073
+    },
+    {
+      "path": "outside/secret.txt",
+      "sha256": "5b39a97fd73022c3129abefc5115802526d3df8cdfa08a94bc423ebe420dc6d1",
+      "size": 17
+    },
+    {
+      "path": "package.json",
+      "sha256": "d91000e9d2cb2373b4dcd73027bdeb42e60790c8d7469618bad256770109bbed",
+      "size": 1187
+    },
+    {
+      "path": "path-utils.ts",
+      "sha256": "d8254889f4e58493d52878afdb7ccfc516e2edca13dc0868c08a6c1576c274ce",
+      "size": 4489
+    },
+    {
+      "path": "path-validation.ts",
+      "sha256": "20833254c044c3d4d0672616ad546d50f09dae8b704c8a3619b86310f2cec3ba",
+      "size": 2731
+    },
+    {
+      "path": "roots-utils.ts",
+      "sha256": "bce7c15a73dc592c23339edcd68603d08fed8d7f3d0f371db29042703f93240d",
+      "size": 2809
+    },
+    {
+      "path": "sandbox/public.txt",
+      "sha256": "cd0eb4af5b9f0fdc38723433c02a911ef438ca7d585da025449c0e9639229585",
+      "size": 20
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "5ddbf4d7843399b0179e02922c2dd19cc20ee07399af182b0f24b84eb63a5cb2",
+      "size": 394
+    }
+  ]
+}

@@ -27,7 +27,8 @@
 ## Phase 4: pilot (current)
 
 - [x] Reference fixture campaign (`campaigns/fixture-lab`)
-- [ ] Choose one authorized open-source MCP server with a local fixture
+- [x] Choose one authorized open-source MCP server with a local fixture
+      (`campaigns/mcp-filesystem`: official filesystem MCP server)
 - [ ] Run a bounded four-worker campaign
 - [ ] Measure approach diversity, false positives, evidence completeness,
       runtime, and model cost
