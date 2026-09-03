@@ -3,12 +3,11 @@
 A deterministic campaign harness for AI-assisted vulnerability research on
 **authorized, locally reproducible targets**.
 
-VRH turns the multi-agent research pattern demonstrated by OpenAI's Cycle
-Double Cover prompt (adapted to security research by Searchlight Cyber's
-wp2shell work) into a stateful, auditable system: a campaign contract that
-pins the target and success condition, an approach registry that prevents
-premature agent convergence, and an evidence ledger that records every state
-transition from hypothesis to reproduced impact.
+VRH turns multi-agent vulnerability research into a stateful, auditable
+system: a campaign contract that pins the target and success condition, an
+approach registry that prevents premature agent convergence, and an evidence
+ledger that records every state transition from hypothesis to reproduced
+impact.
 
 **Status: Phase 4 pilot.** Phases 1–3 are complete: contract, registry,
 ledger, coordinator round loop, container-backed reproduction (`vrh repro`),
@@ -88,12 +87,15 @@ vrh families list ./campaigns/mcp-filesystem-server
 # isolation, then ingest validated results
 vrh round plan ./campaigns/mcp-filesystem-server 4
 vrh round ingest ./campaigns/mcp-filesystem-server
+
+# Review sanitized MCP tool schemas offline (hypotheses only; no target execution)
+vrh review-mcp-schema ./tools.json
 ```
 
 ## Repository layout
 
 ```
-cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox, campaign status)
+cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox, campaign status, review-mcp-schema)
 campaigns/fixture-lab/  reference synthetic campaign (see README there)
 campaigns/mcp-filesystem/  official filesystem MCP server, local fixture (see README there)
 internal/contract/  campaign contract load/validate (YAML, digest-pinned)
@@ -108,6 +110,7 @@ internal/repro/     minimal reproduction runner (marker + pinned snapshot)
 internal/container/ disposable OCI adapter (digest-pinned image, network none)
 internal/sandbox/   network-denial probes (fail-closed)
 internal/validate/  adversarial disproof lane
+internal/mcpreview/ offline MCP tool-schema reviewer (trust-boundary hypotheses only)
 docs/               method, safety model, contract reference, campaign layout, roadmap
 ```
 
