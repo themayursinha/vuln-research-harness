@@ -233,6 +233,14 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 	if prefix, ok := obj["prefixItems"].([]any); ok {
 		w.walkSchemaList(prefix, loc+".prefixItems", "items", depth)
 	}
+	if child, ok := asSchema(obj["additionalItems"]); ok {
+		w.enter(walkFrame{
+			node:     child,
+			loc:      loc + ".additionalItems",
+			propName: "items",
+			depth:    depth + 1,
+		}, true)
+	}
 	for _, key := range []string{"allOf", "anyOf", "oneOf"} {
 		arr, ok := obj[key].([]any)
 		if !ok {

@@ -119,7 +119,7 @@ func (e *constraintEval) searchRef(ref string, kind constraintKind, depth int, a
 
 func (e *constraintEval) searchComposition(node map[string]any, kind constraintKind, depth int, arrayCtx bool) bool {
 	if branches := schemaBranches(node["allOf"]); len(branches) > 0 {
-		if e.searchAnyBranch(branches, kind, depth, arrayCtx || allOfForcesArray(node, branches)) {
+		if e.searchAnyBranch(branches, kind, depth, arrayCtx || e.allOfForcesArray(node, branches, depth)) {
 			return true
 		}
 	}
@@ -194,21 +194,55 @@ func branchExcludedByArrayParent(b schemaNode) bool {
 
 // allOfForcesArray reports whether an allOf conjunction accepts only arrays
 // (modulo non-viable types such as null): the parent declares array-only, or
-// any branch does. Every accepted instance then satisfies that conjunct, so
+// any branch does — directly, through a nested allOf, or through a local
+// reference. Every accepted instance then satisfies that conjunct, so
 // sibling item keywords constrain all of them.
-func allOfForcesArray(parent map[string]any, branches []schemaNode) bool {
+func (e *constraintEval) allOfForcesArray(parent map[string]any, branches []schemaNode, depth int) bool {
 	if declaresArrayOnly(parent) {
 		return true
 	}
 	for _, b := range branches {
-		if b.kind != schemaObject {
-			continue
-		}
-		if declaresArrayOnly(b.obj) {
+		if e.branchForcesArray(b, depth+1) {
 			return true
 		}
 	}
 	return false
+}
+
+// branchForcesArray reports whether one allOf branch forces array-only
+// typing on the conjunction, following nested allOf conjunctions and local
+// references (cycle-guarded). Disjunctions never force: an anyOf/oneOf
+// branch still admits every alternative.
+func (e *constraintEval) branchForcesArray(b schemaNode, depth int) bool {
+	if depth >= maxConstraintDepth {
+		return false
+	}
+	if b.kind != schemaObject {
+		return false
+	}
+	if declaresArrayOnly(b.obj) {
+		return true
+	}
+	if sub := schemaBranches(b.obj["allOf"]); len(sub) > 0 {
+		if e.allOfForcesArray(b.obj, sub, depth+1) {
+			return true
+		}
+	}
+	ref, ok := b.obj["$ref"].(string)
+	if !ok {
+		return false
+	}
+	if _, looping := e.activeRefs[ref]; looping {
+		return false
+	}
+	target, ok := resolveLocalRef(e.root, ref)
+	if !ok {
+		return false
+	}
+	e.activeRefs[ref] = struct{}{}
+	forces := e.branchForcesArray(target, depth+1)
+	delete(e.activeRefs, ref)
+	return forces
 }
 
 // declaresArrayOnly reports whether a type declaration allows arrays but no
@@ -669,12 +703,26 @@ func nestedAlternativesConstrained(pat string) bool {
 			continue
 		}
 		for _, alt := range alts {
-			if hasUnboundedSkipBeforeMarker(alt) {
+			if hasUnboundedSkipBeforeMarker(alt) || alternativeCanMatchEmpty(alt) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// alternativeCanMatchEmpty reports whether a nested regex alternative can
+// match the empty string: an empty branch or an optional group such as
+// (https://)?. Either lets the overall pattern match at the start of every
+// string, so the pattern constrains nothing even when a sibling branch pins
+// a URL marker. (Star-quantified branches such as .* are already rejected by
+// the unbounded-skip check.)
+func alternativeCanMatchEmpty(alt string) bool {
+	a := strings.TrimSpace(alt)
+	if a == "" {
+		return true
+	}
+	return len(a) >= 3 && a[0] == '(' && strings.HasSuffix(a, ")?")
 }
 
 // hasUnboundedSkipBeforeMarker reports whether frag can match an arbitrary
@@ -701,37 +749,14 @@ func hasUnboundedSkipBeforeMarker(frag string) bool {
 // pat, innermost included, honoring escapes and character classes.
 // Unterminated groups run to the end of the pattern.
 func groupInnerTexts(pat string) []string {
-	var inners []string
-	var stack []int
-	inClass := false
-	escaped := false
-	for i := 0; i < len(pat); i++ {
-		c := pat[i]
-		if escaped {
-			escaped = false
-			continue
+	spans := groupSpans(pat)
+	inners := make([]string, 0, len(spans))
+	for _, span := range spans {
+		end := span.close
+		if end > len(pat) {
+			end = len(pat)
 		}
-		switch c {
-		case '\\':
-			escaped = true
-		case '[':
-			inClass = true
-		case ']':
-			inClass = false
-		case '(':
-			if !inClass {
-				stack = append(stack, i)
-			}
-		case ')':
-			if !inClass && len(stack) > 0 {
-				open := stack[len(stack)-1]
-				stack = stack[:len(stack)-1]
-				inners = append(inners, pat[open+1:i])
-			}
-		}
-	}
-	for _, open := range stack {
-		inners = append(inners, pat[open+1:])
+		inners = append(inners, pat[span.open+1:end])
 	}
 	return inners
 }
@@ -756,7 +781,68 @@ func anchoredMarkerConstrainsURL(alt string) bool {
 	if marker < 0 {
 		return false
 	}
+	if markerInOptionalGroup(rest, marker) {
+		// The only early marker sits inside a ?- or *-quantified group (as
+		// in ^(https://)?.*$), so a match need not include it at all.
+		return false
+	}
 	return !hasUnboundedSkip(rest[1:marker])
+}
+
+// markerInOptionalGroup reports whether position idx sits inside a group
+// whose match is optional via a trailing ? or * quantifier.
+func markerInOptionalGroup(s string, idx int) bool {
+	for _, span := range groupSpans(s) {
+		if span.open < idx && idx < span.close {
+			if span.close+1 < len(s) && (s[span.close+1] == '?' || s[span.close+1] == '*') {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// groupSpan is an open/close index pair for one parenthesized group.
+type groupSpan struct {
+	open, close int
+}
+
+// groupSpans returns every parenthesized group span in pat, honoring escapes
+// and character classes. Unterminated groups run to the end of the pattern.
+func groupSpans(pat string) []groupSpan {
+	var spans []groupSpan
+	var stack []int
+	inClass := false
+	escaped := false
+	for i := 0; i < len(pat); i++ {
+		c := pat[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '(':
+			if !inClass {
+				stack = append(stack, i)
+			}
+		case ')':
+			if !inClass && len(stack) > 0 {
+				open := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				spans = append(spans, groupSpan{open: open, close: i})
+			}
+		}
+	}
+	for _, open := range stack {
+		spans = append(spans, groupSpan{open: open, close: len(pat)})
+	}
+	return spans
 }
 
 // hasUnboundedSkip reports whether a regex fragment can skip an arbitrary

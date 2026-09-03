@@ -582,6 +582,41 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
 		},
 		{
+			name:    "nested empty branch still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://|)"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "optional marker group still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://)?.*$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "mandatory marker group stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://)$"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "nested url behind additionalItems is visited",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","items":[{"type":"string"}],"additionalItems":{"properties":{"url":{"type":"string"}}}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls.additionalItems.properties.url"}},
+		},
+		{
+			name:   "allOf array forcing via local ref stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"allOf":[{"$ref":"#/$defs/Array"},{"items":{"enum":["https://safe.invalid"]}}]}},"$defs":{"Array":{"type":"array"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:    "allOf non-array ref does not force array items",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"allOf":[{"$ref":"#/$defs/Str"},{"items":{"enum":["https://safe.invalid"]}}]}},"$defs":{"Str":{"type":"string"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "allOf nested array conjunction stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"allOf":[{"allOf":[{"type":"array"}]},{"items":{"enum":["https://safe.invalid"]}}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
 			name:    "closed tuple with viable plain slot still emits",
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"string"}],"items":false}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
