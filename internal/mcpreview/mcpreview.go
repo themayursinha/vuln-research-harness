@@ -183,7 +183,7 @@ func reviewTool(rep *reporter, name, description string, schema map[string]any) 
 				Category:    CategoryUnconstrainedPath,
 				Location:    loc,
 				MatchedText: cue,
-				Rationale:   "Path-like argument has no root, pattern, or enum constraint (research triage, not a confirmed vulnerability).",
+				Rationale:   "Path-like argument has no root or enum constraint (research triage, not a confirmed vulnerability).",
 			})
 		}
 		if cue, ok := commandCue(propName, keywords); ok && eval.unconstrained(node, origin, constraintCommand) {
@@ -192,7 +192,7 @@ func reviewTool(rep *reporter, name, description string, schema map[string]any) 
 				Category:    CategoryUnconstrainedCommand,
 				Location:    loc,
 				MatchedText: cue,
-				Rationale:   "Command-like argument has no enum or restrictive pattern constraint (research triage, not a confirmed vulnerability).",
+				Rationale:   "Command-like argument has no enum or const constraint (research triage, not a confirmed vulnerability).",
 			})
 		}
 	})

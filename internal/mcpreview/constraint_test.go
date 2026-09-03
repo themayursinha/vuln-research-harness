@@ -44,13 +44,8 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
-			name:   "url constrained via oneOf pattern",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"oneOf":[{"type":"string","pattern":"^https://"}]}}}}`),
-			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
-		},
-		{
-			name:    "url unconstrained via oneOf vacuous pattern",
-			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"oneOf":[{"type":"string","pattern":".*"}]}}}}`),
+			name:    "oneOf pattern-only still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"oneOf":[{"type":"string","pattern":"^https://"}]}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
@@ -471,9 +466,14 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
-			name:   "flagged anchored url pattern stays constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"(?i)^https://"}}}}`),
+			name:   "enum still constrains beside an ignored pattern",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^https://","enum":["https://example.invalid"]}}}}`),
 			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "flagged anchored url pattern still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"(?i)^https://"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
 			name:    "start-only wildcard path pattern still emits",
@@ -516,14 +516,14 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
-			name:   "grouped anchored url pattern stays constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https?://)"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+			name:    "grouped anchored url pattern still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https?://)"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
-			name:   "alternatives all anchored stay constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^https://|^wss://"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+			name:    "alternatives all anchored still emit",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^https://|^wss://"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
 			name:    "half-anchored alternative still emits",
@@ -562,9 +562,9 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
-			name:   "nested clean branches stay constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https|wss)://"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+			name:    "nested clean branches still emit",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https|wss)://"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
 			name:    "deeply nested wildcard branch still emits",
@@ -592,9 +592,9 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
-			name:   "mandatory marker group stays constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://)$"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+			name:    "mandatory marker group still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://)$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
 			name:    "nested url behind additionalItems is visited",
@@ -664,9 +664,9 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
-			name:   "positive lookahead marker stays constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(?=https://)"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+			name:    "positive lookahead marker still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(?=https://)"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
 			name:    "nullable path pattern still emits",
@@ -685,14 +685,14 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
 		},
 		{
-			name:   "fully anchored empty match stays constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^$"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+			name:    "fully anchored empty match still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
 		},
 		{
-			name:   "fully anchored class star stays constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^[a-z]*$"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+			name:    "fully anchored class star still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^[a-z]*$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
 		},
 		{
 			name:    "fully anchored dot star still emits",
@@ -706,9 +706,9 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
 		},
 		{
-			name:   "unwrapped clean branches stay constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"cmd":{"type":"string","pattern":"^(status|health)$"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedCommand, cmdLoc}},
+			name:    "unwrapped clean branches still emit",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"command":{"type":"string","pattern":"^(status|health)$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedCommand, cmdLoc}},
 		},
 		{
 			name:    "brace-optional marker group still emits",
@@ -716,9 +716,9 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
-			name:   "brace-required marker group stays constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://){1,2}.*$"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+			name:    "brace-required marker group still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://){1,2}.*$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 
 		{
@@ -727,14 +727,14 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
 		},
 		{
-			name:   "quantified restricted group stays constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^([a-z])+$"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+			name:    "quantified restricted group still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^([a-z])+$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
 		},
 		{
-			name:   "noncapturing alternation stays constrained",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(?:https|wss)://"}}}}`),
-			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+			name:    "noncapturing alternation still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(?:https|wss)://"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
 			name:    "single skip group still emits",

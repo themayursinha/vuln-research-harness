@@ -59,10 +59,22 @@ func TestReviewCategories(t *testing.T) {
 			wantLoc: "inputSchema.properties.target",
 		},
 		{
-			name:    "vacuous url pattern is unconstrained",
-			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":".*"}}}}`),
+			name:    "url pattern is unconstrained",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^https://"}}}}`),
 			wantCat: CategoryUnconstrainedURL,
 			wantLoc: "inputSchema.properties.url",
+		},
+		{
+			name:    "path pattern is unconstrained",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"file":{"type":"string","pattern":"^/tmp/sandbox/"}}}}`),
+			wantCat: CategoryUnconstrainedPath,
+			wantLoc: "inputSchema.properties.file",
+		},
+		{
+			name:    "command pattern is unconstrained",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"cmd":{"type":"string","pattern":"^(status|health)$"}}}}`),
+			wantCat: CategoryUnconstrainedCommand,
+			wantLoc: "inputSchema.properties.cmd",
 		},
 	}
 	for _, tt := range tests {
@@ -107,18 +119,8 @@ func TestReviewConstrainedArgumentsProduceNoMatchingHypothesis(t *testing.T) {
 			absent: CategoryUnconstrainedURL,
 		},
 		{
-			name:   "url restrictive pattern",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^https://"}}}}`),
-			absent: CategoryUnconstrainedURL,
-		},
-		{
 			name:   "path root",
 			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","root":"/tmp/sandbox"}}}}`),
-			absent: CategoryUnconstrainedPath,
-		},
-		{
-			name:   "path pattern",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"file":{"type":"string","pattern":"^/tmp/sandbox/"}}}}`),
 			absent: CategoryUnconstrainedPath,
 		},
 		{
@@ -129,11 +131,6 @@ func TestReviewConstrainedArgumentsProduceNoMatchingHypothesis(t *testing.T) {
 		{
 			name:   "command enum",
 			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"command":{"type":"string","enum":["status"]}}}}`),
-			absent: CategoryUnconstrainedCommand,
-		},
-		{
-			name:   "command pattern",
-			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"cmd":{"type":"string","pattern":"^(status|health)$"}}}}`),
 			absent: CategoryUnconstrainedCommand,
 		},
 		{
