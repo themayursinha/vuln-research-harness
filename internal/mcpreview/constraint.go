@@ -54,7 +54,15 @@ func (e *constraintEval) unconstrained(node, origin, instance schemaNode, propNa
 		if e.propertyForbidden(instance, propName, 0) {
 			return false
 		}
-		return !e.propertyHas(instance, propName, kind, 0)
+		e.visited = 0
+		clear(e.active)
+		clear(e.activeRefs)
+		if e.propertyApplies(instance, propName, 0) {
+			e.visited = 0
+			clear(e.active)
+			clear(e.activeRefs)
+			return !e.propertyHas(instance, propName, kind, 0)
+		}
 	}
 	return !e.has(origin, kind)
 }
@@ -124,6 +132,11 @@ func (e *constraintEval) propertyHas(node schemaNode, name string, kind constrai
 			return true
 		}
 	}
+	for _, b := range requiredDependentSchemas(obj) {
+		if e.propertyHas(b, name, kind, depth+1) {
+			return true
+		}
+	}
 	for _, key := range []string{"anyOf", "oneOf"} {
 		branches := schemaBranches(obj[key])
 		if len(branches) == 0 {
@@ -132,7 +145,7 @@ func (e *constraintEval) propertyHas(node schemaNode, name string, kind constrai
 		all := true
 		anyOpen := false
 		for _, b := range branches {
-			if e.propertyForbidden(b, name, depth+1) {
+			if e.propertyForbidden(b, name, depth+1) || objectBranchExcluded(obj, b) {
 				continue
 			}
 			anyOpen = true
@@ -143,6 +156,63 @@ func (e *constraintEval) propertyHas(node schemaNode, name string, kind constrai
 		}
 		if anyOpen && all {
 			return true
+		}
+	}
+	return false
+}
+
+func (e *constraintEval) propertyApplies(node schemaNode, name string, depth int) bool {
+	if node.kind != schemaObject {
+		return false
+	}
+	if depth >= maxConstraintDepth || e.visited >= maxVisitedNodes {
+		return false
+	}
+	obj := node.obj
+	id := fmt.Sprintf("apply:%p:%s", obj, name)
+	if _, looping := e.active[id]; looping {
+		return false
+	}
+	e.visited++
+	e.active[id] = struct{}{}
+	defer delete(e.active, id)
+
+	if propertyDeclared(obj, name) || patternPropertyMatches(obj, name) {
+		return true
+	}
+	if _, exists := obj["additionalProperties"]; exists {
+		return true
+	}
+	if ref, ok := obj["$ref"].(string); ok {
+		if _, looping := e.activeRefs[ref]; !looping {
+			if target, ok := resolveLocalRef(e.root, ref); ok {
+				e.activeRefs[ref] = struct{}{}
+				found := e.propertyApplies(target, name, depth+1)
+				delete(e.activeRefs, ref)
+				if found {
+					return true
+				}
+			}
+		}
+	}
+	for _, b := range schemaBranches(obj["allOf"]) {
+		if e.propertyApplies(b, name, depth+1) {
+			return true
+		}
+	}
+	for _, b := range requiredDependentSchemas(obj) {
+		if e.propertyApplies(b, name, depth+1) {
+			return true
+		}
+	}
+	for _, key := range []string{"anyOf", "oneOf"} {
+		for _, b := range schemaBranches(obj[key]) {
+			if e.propertyForbidden(b, name, depth+1) || objectBranchExcluded(obj, b) {
+				continue
+			}
+			if e.propertyApplies(b, name, depth+1) {
+				return true
+			}
 		}
 	}
 	return false
@@ -194,6 +264,48 @@ func propertyDeclared(obj map[string]any, name string) bool {
 	}
 	_, exists := props[name]
 	return exists
+}
+
+func objectBranchExcluded(parent map[string]any, branch schemaNode) bool {
+	if !declaresObjectOnly(parent) {
+		return false
+	}
+	return declaresNonObjectOnly(branch)
+}
+
+func declaresObjectOnly(obj map[string]any) bool {
+	types, ok := declaredTypes(obj)
+	if !ok {
+		return false
+	}
+	hasObject := false
+	for _, t := range types {
+		if t == "object" {
+			hasObject = true
+			continue
+		}
+		if t == "null" {
+			continue
+		}
+		return false
+	}
+	return hasObject
+}
+
+func declaresNonObjectOnly(node schemaNode) bool {
+	if node.kind != schemaObject || node.obj == nil {
+		return false
+	}
+	types, ok := declaredTypes(node.obj)
+	if !ok {
+		return false
+	}
+	for _, t := range types {
+		if t == "object" {
+			return false
+		}
+	}
+	return true
 }
 
 func patternPropertyMatches(obj map[string]any, name string) bool {

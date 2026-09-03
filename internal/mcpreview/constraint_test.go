@@ -698,6 +698,26 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.anyOf[0].properties.target"}},
 		},
 		{
+			name:   "nested object allOf sibling enum constrains property",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"payload":{"allOf":[{"properties":{"url":{"type":"string"}}},{"properties":{"url":{"enum":["https://safe.invalid"]}}}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.payload.allOf[0].properties.url"}, {CategoryUnconstrainedURL, "inputSchema.properties.payload.allOf[1].properties.url"}},
+		},
+		{
+			name:   "required dependentSchemas enum constrains property",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"required":["mode"],"dependentSchemas":{"mode":{"properties":{"url":{"enum":["https://safe.invalid"]}}}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.dependentSchemas.mode.properties.url"}},
+		},
+		{
+			name:    "optional dependentSchemas url is still an argument",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"dependentSchemas":{"mode":{"properties":{"url":{"type":"string"}}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.dependentSchemas.mode.properties.url"}},
+		},
+		{
+			name:   "object type excludes string anyOf branch",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"type":"object","required":["url"],"anyOf":[{"properties":{"url":{"enum":["https://safe.invalid"]}}},{"type":"string"}]}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.url"}, {CategoryUnconstrainedURL, "inputSchema.anyOf[0].properties.url"}},
+		},
+		{
 			name:   "ref to object keeps nested property enum",
 			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"payload":{"$ref":"#/$defs/Obj"}},"$defs":{"Obj":{"properties":{"url":{"enum":["https://safe.invalid"]}}}}}}`),
 			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.payload.properties.url"}},

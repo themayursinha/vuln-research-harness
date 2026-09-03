@@ -201,17 +201,14 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 	loc := f.loc
 	depth := f.depth
 	// Nested properties belong to this schema when the frame is already a
-	// named property's value ($ref target, items object, etc.). Composition
-	// inspect of a property value keeps the enclosing object so sibling
-	// allOf/anyOf constraints still apply at the cue site.
+	// named property's value ($ref target, payload object, etc.). Composition
+	// of that value uses the same object so sibling allOf/anyOf properties
+	// apply one nesting level down.
 	nestedObject := f.objectInstance()
 	if f.propName != "" {
 		nestedObject = f.node
 	}
-	composeInst := f.instance
-	if composeInst.kind == schemaInvalid {
-		composeInst = f.objectInstance()
-	}
+	composeInst := nestedObject
 	declared, _ := asObject(obj["properties"])
 	if declared != nil {
 		for _, name := range sortedKeys(declared) {
@@ -395,6 +392,44 @@ func requiredOnlyNames(obj, declared map[string]any) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func requiredNameSet(obj map[string]any) map[string]struct{} {
+	arr, ok := obj["required"].([]any)
+	if !ok {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, item := range arr {
+		name, ok := item.(string)
+		if !ok || name == "" {
+			continue
+		}
+		seen[name] = struct{}{}
+	}
+	return seen
+}
+
+func requiredDependentSchemas(obj map[string]any) []schemaNode {
+	deps, ok := asObject(obj["dependentSchemas"])
+	if !ok {
+		return nil
+	}
+	required := requiredNameSet(obj)
+	if len(required) == 0 {
+		return nil
+	}
+	var out []schemaNode
+	for _, key := range sortedKeys(deps) {
+		if _, ok := required[key]; !ok {
+			continue
+		}
+		child, ok := asSchema(deps[key])
+		if ok {
+			out = append(out, child)
+		}
+	}
+	return out
 }
 
 // schemaForUndeclaredProperty is the schema that applies to a required name
