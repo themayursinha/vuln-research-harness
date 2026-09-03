@@ -617,6 +617,48 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
 		},
 		{
+			name:    "optional-atom branch still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://|a?)"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "nested empty branch still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://|)"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "optional marker group still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://)?.*$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "single-schema items ignores additionalItems tail",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","items":{"type":"string"},"additionalItems":{"properties":{"url":{"type":"string"}}}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+			absent:  []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls.additionalItems.properties.url"}},
+		},
+		{
+			name:    "legacy tuple still visits additionalItems tail",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","items":[{"type":"string"}],"additionalItems":{"properties":{"url":{"type":"string"}}}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls.additionalItems.properties.url"}},
+		},
+		{
+			name:   "nullable-array ref forces array items",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"allOf":[{"$ref":"#/$defs/Arr"},{"items":{"enum":["https://safe.invalid"]}}]}},"$defs":{"Arr":{"anyOf":[{"type":"array"},{"type":"null"}]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:    "mixed scalar disjunction does not force array items",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"allOf":[{"$ref":"#/$defs/Mix"},{"items":{"enum":["https://safe.invalid"]}}]}},"$defs":{"Mix":{"anyOf":[{"type":"array"},{"type":"string"}]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
+		{
+			name:   "properties under not are not arguments",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"not":{"properties":{"url":{"type":"string"}}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.not.properties.url"}},
+		},
+
+		{
 			name:    "closed tuple with viable plain slot still emits",
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"string"}],"items":false}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},

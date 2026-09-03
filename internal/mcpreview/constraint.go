@@ -119,7 +119,7 @@ func (e *constraintEval) searchRef(ref string, kind constraintKind, depth int, a
 
 func (e *constraintEval) searchComposition(node map[string]any, kind constraintKind, depth int, arrayCtx bool) bool {
 	if branches := schemaBranches(node["allOf"]); len(branches) > 0 {
-		if e.searchAnyBranch(branches, kind, depth, arrayCtx || e.allOfForcesArray(node, branches, depth)) {
+		if e.searchAnyBranch(branches, kind, depth, arrayCtx || e.allOfForcesArray(node, branches, kind, depth)) {
 			return true
 		}
 	}
@@ -197,12 +197,12 @@ func branchExcludedByArrayParent(b schemaNode) bool {
 // any branch does — directly, through a nested allOf, or through a local
 // reference. Every accepted instance then satisfies that conjunct, so
 // sibling item keywords constrain all of them.
-func (e *constraintEval) allOfForcesArray(parent map[string]any, branches []schemaNode, depth int) bool {
+func (e *constraintEval) allOfForcesArray(parent map[string]any, branches []schemaNode, kind constraintKind, depth int) bool {
 	if declaresArrayOnly(parent) {
 		return true
 	}
 	for _, b := range branches {
-		if e.branchForcesArray(b, depth+1) {
+		if e.branchForcesArray(b, kind, depth+1) {
 			return true
 		}
 	}
@@ -210,10 +210,11 @@ func (e *constraintEval) allOfForcesArray(parent map[string]any, branches []sche
 }
 
 // branchForcesArray reports whether one allOf branch forces array-only
-// typing on the conjunction, following nested allOf conjunctions and local
-// references (cycle-guarded). Disjunctions never force: an anyOf/oneOf
-// branch still admits every alternative.
-func (e *constraintEval) branchForcesArray(b schemaNode, depth int) bool {
+// typing on the conjunction — directly, through a nested allOf, through a
+// local reference, or through a disjunction whose only viable alternative is
+// array-forcing (such as a nullable-array anyOf). Disjunctions admitting a
+// viable non-array alternative never force.
+func (e *constraintEval) branchForcesArray(b schemaNode, kind constraintKind, depth int) bool {
 	if depth >= maxConstraintDepth {
 		return false
 	}
@@ -224,7 +225,31 @@ func (e *constraintEval) branchForcesArray(b schemaNode, depth int) bool {
 		return true
 	}
 	if sub := schemaBranches(b.obj["allOf"]); len(sub) > 0 {
-		if e.allOfForcesArray(b.obj, sub, depth+1) {
+		if e.allOfForcesArray(b.obj, sub, kind, depth+1) {
+			return true
+		}
+	}
+	for _, key := range []string{"anyOf", "oneOf"} {
+		if _, present := b.obj[key]; !present {
+			continue
+		}
+		subs := schemaBranches(b.obj[key])
+		if len(subs) == 0 {
+			continue
+		}
+		onlyArray := true
+		anyViable := false
+		for _, sub := range subs {
+			if !e.viableForKind(sub, kind, depth+1) {
+				continue
+			}
+			anyViable = true
+			if !e.branchForcesArray(sub, kind, depth+1) {
+				onlyArray = false
+				break
+			}
+		}
+		if anyViable && onlyArray {
 			return true
 		}
 	}
@@ -240,7 +265,7 @@ func (e *constraintEval) branchForcesArray(b schemaNode, depth int) bool {
 		return false
 	}
 	e.activeRefs[ref] = struct{}{}
-	forces := e.branchForcesArray(target, depth+1)
+	forces := e.branchForcesArray(target, kind, depth+1)
 	delete(e.activeRefs, ref)
 	return forces
 }
@@ -712,17 +737,205 @@ func nestedAlternativesConstrained(pat string) bool {
 }
 
 // alternativeCanMatchEmpty reports whether a nested regex alternative can
-// match the empty string: an empty branch or an optional group such as
-// (https://)?. Either lets the overall pattern match at the start of every
-// string, so the pattern constrains nothing even when a sibling branch pins
-// a URL marker. (Star-quantified branches such as .* are already rejected by
-// the unbounded-skip check.)
+// match the empty string — an empty branch, an optional group such as
+// (https://)?, or any branch whose every element is optional such as a?.
+// Such a branch lets the overall pattern match at the start of every string,
+// so the pattern constrains nothing even when a sibling branch pins a URL
+// marker. (Branches with unbounded skips such as .* are already rejected by
+// the skip check.)
 func alternativeCanMatchEmpty(alt string) bool {
-	a := strings.TrimSpace(alt)
-	if a == "" {
+	s := strings.TrimSpace(alt)
+	if s == "" {
 		return true
 	}
-	return len(a) >= 3 && a[0] == '(' && strings.HasSuffix(a, ")?")
+	for len(s) > 0 {
+		nullable, rest, ok := consumeNullableAtom(s)
+		if !ok || !nullable {
+			return false
+		}
+		s = strings.TrimSpace(rest)
+	}
+	return true
+}
+
+// consumeNullableAtom consumes one top-level regex atom (with any trailing
+// quantifier) and reports whether that atom can match empty. Malformed input
+// is reported nullable so review stays on the emitting side. The caller must
+// always make progress: every path either consumes input or returns ok=false.
+func consumeNullableAtom(s string) (nullable bool, rest string, ok bool) {
+	if s == "" {
+		return false, "", false
+	}
+	atomNullable := false
+	switch s[0] {
+	case '^', '$':
+		// Zero-width assertions always match empty.
+		s = s[1:]
+		atomNullable = true
+	case '\\':
+		if len(s) < 2 {
+			return true, "", true
+		}
+		s = s[2:]
+	case '[':
+		end := indexUnescapedBracket(s)
+		if end < 0 {
+			return true, "", true
+		}
+		s = s[end+1:]
+	case '(':
+		end := matchRegexParen(s)
+		if end < 0 {
+			return true, "", true
+		}
+		inner := s[1:end]
+		s = s[end+1:]
+		if isRegexLookaround(inner) {
+			// Lookahead/lookbehind assertions are zero-width.
+			atomNullable = true
+		} else {
+			branchEmpty := false
+			for _, branch := range splitTopLevelAlternatives(inner) {
+				if alternativeCanMatchEmpty(branch) {
+					branchEmpty = true
+					break
+				}
+			}
+			atomNullable = branchEmpty
+		}
+	case '*', '+', '?', ')', '|', ']', '}':
+		// Stray metacharacters are malformed; report nullable (emitting
+		// side) and consume the remainder so the caller terminates.
+		return true, "", true
+	default:
+		s = s[1:]
+	}
+	if len(s) > 0 && (s[0] == '?' || s[0] == '*') {
+		return true, skipLazyMarker(s[1:]), true
+	}
+	if len(s) > 0 && s[0] == '+' {
+		return atomNullable, skipLazyMarker(s[1:]), true
+	}
+	if len(s) > 0 && s[0] == '{' {
+		if nullable, after, valid := braceQuantifierNullability(s, atomNullable); valid {
+			return nullable, after, true
+		}
+		// Invalid braces are literals in ECMA syntax; fall through and let
+		// the "{" be consumed as a literal below.
+		s = s[1:]
+		return false, s, true
+	}
+	return atomNullable, s, true
+}
+
+// skipLazyMarker consumes one optional lazy "?" following a quantifier.
+func skipLazyMarker(s string) string {
+	return strings.TrimPrefix(s, "?")
+}
+
+// braceQuantifierNullability parses a "{m,n}"-style quantifier at s[0]=='{'
+// and reports the nullability it confers on an atom with base nullability
+// nb, consuming the quantifier. Only well-formed quantifiers are accepted;
+// {0}, {0,} and {0,m} always match empty, other forms inherit nb.
+func braceQuantifierNullability(s string, nb bool) (bool, string, bool) {
+	end := strings.Index(s, "}")
+	if end < 0 {
+		return false, s, false
+	}
+	body := s[1:end]
+	minStr := body
+	if comma := strings.Index(body, ","); comma >= 0 {
+		minStr = body[:comma]
+		if !allDigitsOrEmpty(body[comma+1:]) {
+			return false, s, false
+		}
+	}
+	if !allDigits(minStr) {
+		return false, s, false
+	}
+	if strings.Trim(minStr, "0") == "" {
+		return true, s[end+1:], true
+	}
+	return nb, s[end+1:], true
+}
+
+func allDigits(s string) bool {
+	return len(s) > 0 && allDigitsOrEmpty(s)
+}
+
+func allDigitsOrEmpty(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isRegexLookaround reports whether a group inner opens with a lookahead or
+// lookbehind marker, making the group zero-width (nullable).
+func isRegexLookaround(inner string) bool {
+	for _, prefix := range []string{"?=", "?!", "?<=", "?<!"} {
+		if strings.HasPrefix(inner, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// indexUnescapedBracket returns the index of the first unescaped "]" in s,
+// or -1 when the class is unterminated.
+func indexUnescapedBracket(s string) int {
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+		case ']':
+			return i
+		}
+	}
+	return -1
+}
+
+// matchRegexParen returns the index of the ")" closing the "(" at s[0],
+// honoring escapes and character classes, or -1 when unbalanced.
+func matchRegexParen(s string) int {
+	depth := 0
+	inClass := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch c {
+		case '\\':
+			escaped = true
+		case '[':
+			inClass = true
+		case ']':
+			inClass = false
+		case '(':
+			if !inClass {
+				depth++
+			}
+		case ')':
+			if !inClass {
+				depth--
+				if depth == 0 {
+					return i
+				}
+			}
+		}
+	}
+	return -1
 }
 
 // hasUnboundedSkipBeforeMarker reports whether frag can match an arbitrary

@@ -233,13 +233,17 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 	if prefix, ok := obj["prefixItems"].([]any); ok {
 		w.walkSchemaList(prefix, loc+".prefixItems", "items", depth)
 	}
-	if child, ok := asSchema(obj["additionalItems"]); ok {
-		w.enter(walkFrame{
-			node:     child,
-			loc:      loc + ".additionalItems",
-			propName: "items",
-			depth:    depth + 1,
-		}, true)
+	if _, ok := obj["items"].([]any); ok {
+		// additionalItems only constrains elements for the legacy tuple
+		// form (items as an array); otherwise the keyword is ignored.
+		if child, ok := asSchema(obj["additionalItems"]); ok {
+			w.enter(walkFrame{
+				node:     child,
+				loc:      loc + ".additionalItems",
+				propName: "items",
+				depth:    depth + 1,
+			}, true)
+		}
 	}
 	for _, key := range []string{"allOf", "anyOf", "oneOf"} {
 		arr, ok := obj[key].([]any)
@@ -268,7 +272,9 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 			}, false)
 		}
 	}
-	for _, key := range []string{"then", "else", "not", "if"} {
+	// then/else/if describe conditionally accepted instances, but not
+	// describes rejected ones, so its properties are never arguments.
+	for _, key := range []string{"then", "else", "if"} {
 		child, ok := asSchema(obj[key])
 		if !ok {
 			continue
