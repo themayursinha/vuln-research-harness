@@ -1,8 +1,8 @@
 {
   "target": "source",
-  "created_at": "2026-09-03T06:48:28Z",
-  "archive_sha256": "49664a84251c7235c7a6d2c18ddf3a86044b1fe2183e03c5d5034697f54bd1a6",
-  "file_count": 11,
+  "created_at": "2026-09-03T07:03:38Z",
+  "archive_sha256": "95cea90c9bf4aab2ffc32188685420d329c35da2cfb01451091296679fff4b80",
+  "file_count": 12,
   "files": [
     {
       "path": "LICENSE",
@@ -11,8 +11,8 @@
     },
     {
       "path": "UPSTREAM.md",
-      "sha256": "5ebc9ae215fd48ff6e5a5fa190e649dabcc8623265fe292b3ef4ea9c99bdb20d",
-      "size": 784
+      "sha256": "dbf1556b6ae9aaf3c2e5346ac66fa7c887adcbbc27c56a8a0723eb27d2a8d60d",
+      "size": 889
     },
     {
       "path": "index.ts",
@@ -28,6 +28,11 @@
       "path": "outside/secret.txt",
       "sha256": "5b39a97fd73022c3129abefc5115802526d3df8cdfa08a94bc423ebe420dc6d1",
       "size": 17
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "25d947c54cb24c85ba4296bf51af1159682bccc3c54eee195d55dfedb4c89862",
+      "size": 115368
     },
     {
       "path": "package.json",

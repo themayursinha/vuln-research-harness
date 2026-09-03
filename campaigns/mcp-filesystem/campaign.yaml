@@ -2,7 +2,7 @@ version: v1
 name: mcp-filesystem
 target:
   name: mcp-filesystem-server
-  source_snapshot: sha256:49664a84251c7235c7a6d2c18ddf3a86044b1fe2183e03c5d5034697f54bd1a6
+  source_snapshot: sha256:95cea90c9bf4aab2ffc32188685420d329c35da2cfb01451091296679fff4b80
   source_path: source
 authorization:
   owner: local-lab-operator
@@ -21,7 +21,7 @@ environment:
   deployment: disposable local container
   network: denied
   isolation: digest-pinned container with read-only snapshot mount
-  container_image: localhost/vrh-mcp-filesystem@sha256:3ed6ae3836d02fe0b75e47998503b5bbc582486aadf4e63849995d0aabccd721
+  container_image: localhost/vrh-mcp-filesystem@sha256:5033003e549ab2dd170607f70856730ade6d5405a733a32c397e91dd57ec14db
   synthetic_data: true
   disposable: true
 success:

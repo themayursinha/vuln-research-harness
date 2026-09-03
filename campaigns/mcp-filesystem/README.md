@@ -8,7 +8,7 @@ MCP, no real files, no external network.
 ## Layout
 
 ```
-source/           pinned snapshot (upstream TS + synthetic sandbox/outside)
+source/           pinned snapshot (upstream TS, lockfile, synthetic sandbox/outside)
 scripts/          hypothesis probe (host-mounted into the container)
 cases.yaml        reproduction cases for vrh repro
 campaign.yaml     contract (digest-pinned container image)

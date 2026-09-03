@@ -12,8 +12,9 @@ servers repository.
 Vendored files are the upstream TypeScript sources at that commit.
 `tsconfig.json` is a standalone copy of the monorepo compiler options so the
 fixture can build without the rest of `servers/`. `package.json` is
-unmodified; the image install uses `npm install --ignore-scripts` so
-upstream `prepare` does not run.
+unmodified. `package-lock.json` is generated from that manifest with the
+same Node image the Dockerfile pins, and the image install uses
+`npm ci --ignore-scripts` so the probe dependency graph cannot float.
 
 Synthetic fixture files (not upstream): `sandbox/public.txt`,
 `outside/secret.txt`.

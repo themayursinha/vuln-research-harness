@@ -42,6 +42,7 @@ campaigns/mcp-filesystem/**
 !campaigns/mcp-filesystem/source/UPSTREAM.md
 !campaigns/mcp-filesystem/source/LICENSE
 !campaigns/mcp-filesystem/source/package.json
+!campaigns/mcp-filesystem/source/package-lock.json
 !campaigns/mcp-filesystem/source/tsconfig.json
 !campaigns/mcp-filesystem/source/index.ts
 !campaigns/mcp-filesystem/source/lib.ts
