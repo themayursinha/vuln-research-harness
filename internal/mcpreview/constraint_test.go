@@ -722,6 +722,27 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 		},
 
 		{
+			name:    "quantified universal group still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^([\\s\\S])*$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+		{
+			name:   "quantified restricted group stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^([a-z])+$"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+		{
+			name:   "noncapturing alternation stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(?:https|wss)://"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "single skip group still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(?:.*)https"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+
+		{
 			name:    "closed tuple with viable plain slot still emits",
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"string"}],"items":false}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},

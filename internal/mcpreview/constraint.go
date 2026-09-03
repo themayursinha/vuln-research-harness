@@ -718,22 +718,49 @@ func patternConstrainsURL(pat string) bool {
 }
 
 // nestedAlternativesConstrained reports whether every group-internal
-// alternative is free of unbounded skips before its URL marker. An anchored
-// early marker on the whole pattern is not enough when a nested branch such
-// as .* in ^(https://|.*)$ accepts arbitrary URLs on its own.
+// alternative is free of unbounded skips before its URL marker and of
+// empty matches. An anchored early marker on the whole pattern is not enough
+// when a nested branch such as .* in ^(https://|.*)$ accepts arbitrary URLs
+// on its own.
 func nestedAlternativesConstrained(pat string) bool {
 	for _, inner := range groupInnerTexts(pat) {
-		alts := splitTopLevelAlternatives(inner)
-		if len(alts) < 2 {
+		content := inner
+		if stripped, transparent := transparentGroupInner(inner); transparent {
+			content = stripped
+		} else if isRegexLookaround(inner) {
+			// Assertions consume nothing; their restrictiveness is handled
+			// by the marker and nullability logic, not here.
 			continue
 		}
-		for _, alt := range alts {
-			if hasUnboundedSkipBeforeMarker(alt) || alternativeCanMatchEmpty(alt) {
-				return false
+		alts := splitTopLevelAlternatives(content)
+		if len(alts) > 1 {
+			for _, alt := range alts {
+				if hasUnboundedSkipBeforeMarker(alt) || alternativeCanMatchEmpty(alt) {
+					return false
+				}
 			}
+			continue
+		}
+		// Even without alternation, an unbounded skip before any marker
+		// floats the match, as in ^(?:.*)https which accepts xhttpsy.
+		if hasUnboundedSkipBeforeMarker(content) {
+			return false
 		}
 	}
 	return true
+}
+
+// transparentGroupInner strips a noncapturing (?:...) or scoped-flag
+// (?flags:...) opener from a group inner, returning the effective content.
+// Other (?...) forms (lookarounds, named groups) are left intact.
+func transparentGroupInner(inner string) (string, bool) {
+	if strings.HasPrefix(inner, "?:") {
+		return inner[2:], true
+	}
+	if n := scopedFlagPrefixLen(inner); n > 0 {
+		return inner[n:], true
+	}
+	return inner, false
 }
 
 // alternativeCanMatchEmpty reports whether a nested regex alternative can
@@ -1257,6 +1284,17 @@ func fullyAnchoredMatchAll(rem string) bool {
 			`(?s).*`, `(?s).+`, `[^]*`, `[^]+`:
 			return true
 		}
+		// A trailing quantifier on a fully-enclosing group still matches
+		// every (nonempty) string when the group is universal, as in
+		// ^([\s\S])*$: reduce to the group inner.
+		if n := len(s); n >= 4 && s[0] == '(' && (s[n-1] == '*' || s[n-1] == '+' || s[n-1] == '?') {
+			if matchRegexParen(s[:n-1]) == n-2 {
+				inner := s[1 : n-2]
+				if isUniversalCharAtom(inner) || fullyAnchoredMatchAll(inner) {
+					return true
+				}
+			}
+		}
 		if len(s) >= 2 && s[0] == '(' && matchRegexParen(s) == len(s)-1 {
 			inner := s[1 : len(s)-1]
 			if strings.HasPrefix(inner, "?:") {
@@ -1274,6 +1312,17 @@ func fullyAnchoredMatchAll(rem string) bool {
 			s = inner
 			continue
 		}
+		return false
+	}
+}
+
+// isUniversalCharAtom reports whether a matches any single character for
+// practical values: dot and the standard match-all classes.
+func isUniversalCharAtom(a string) bool {
+	switch a {
+	case ".", `[\s\S]`, `[\w\W]`, `[^]`:
+		return true
+	default:
 		return false
 	}
 }
