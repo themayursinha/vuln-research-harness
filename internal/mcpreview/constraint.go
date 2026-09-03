@@ -1189,6 +1189,16 @@ func stripLeadingRegexGroups(s string) string {
 
 func isVacuousPattern(pat string) bool {
 	s := stripLeadingRegexGroups(strings.TrimSpace(pat))
+	// Top-level alternation: one everywhere-matching branch is enough, as in
+	// safe|a* whose a* branch matches empty in every input.
+	if alts := splitTopLevelAlternatives(s); len(alts) > 1 {
+		for _, alt := range alts {
+			if isVacuousPattern(alt) {
+				return true
+			}
+		}
+		return false
+	}
 	switch s {
 	case "", ".*", ".+", "^", "$",
 		"^.*", "^.+", ".*$", ".+$", "^.*$", "^.+$",
@@ -1197,12 +1207,73 @@ func isVacuousPattern(pat string) bool {
 		`[\w\W]*`, `[\w\W]+`, `^[\w\W]*`, `^[\w\W]+`,
 		`[\w\W]*$`, `[\w\W]+$`, `^[\w\W]*$`, `^[\w\W]+$`:
 		return true
-	default:
-		// A pattern that can match empty matches everywhere under JSON
-		// Schema's substring semantics, so it restricts nothing — whether
-		// spelled as a wildcard or as nullable atoms such as a* or (foo)?.
-		// (Zero-width assertions that depend on context, like lookaheads,
-		// do not qualify on their own.)
-		return alternativeCanMatchEmptyEverywhere(s)
 	}
+	// A ^...$ pattern only matches via (near-)full matches, so nullability
+	// alone says nothing: ^$ and ^[a-z]*$ are real restrictions while ^.*$
+	// is not. Anything else that can match empty matches everywhere under
+	// substring semantics — whether spelled as a wildcard or as nullable
+	// atoms such as a* or (foo)?. (Zero-width assertions that depend on
+	// context, like lookaheads, do not qualify on their own.)
+	if rest, ok := stripAnchors(s); ok {
+		return fullyAnchoredMatchAll(rest)
+	}
+	return alternativeCanMatchEmptyEverywhere(s)
+}
+
+// stripAnchors removes one leading ^ and one trailing $ anchor, reporting
+// whether both were present.
+func stripAnchors(s string) (string, bool) {
+	if len(s) < 2 || !strings.HasPrefix(s, "^") || !strings.HasSuffix(s, "$") {
+		return s, false
+	}
+	return s[1 : len(s)-1], true
+}
+
+// fullyAnchoredMatchAll reports whether rem (the inside of a ^...$ pattern)
+// fully matches every value, using a tight spelling set plus one layer of
+// grouping at a time. Anything else anchored both sides is a real
+// restriction, including ^$ and ^[a-z]*$.
+func fullyAnchoredMatchAll(rem string) bool {
+	s := rem
+	for {
+		switch s {
+		case `.*`, `.+`, `[\s\S]*`, `[\s\S]+`, `[\w\W]*`, `[\w\W]+`,
+			`(?s).*`, `(?s).+`, `[^]*`, `[^]+`:
+			return true
+		}
+		if len(s) >= 2 && s[0] == '(' && matchRegexParen(s) == len(s)-1 {
+			inner := s[1 : len(s)-1]
+			if strings.HasPrefix(inner, "?:") {
+				s = inner[2:]
+				continue
+			}
+			// Scoped flags such as (?i:...) do not change what matches.
+			if n := scopedFlagPrefixLen(inner); n > 0 {
+				s = inner[n:]
+				continue
+			}
+			if strings.HasPrefix(inner, "?") {
+				return false
+			}
+			s = inner
+			continue
+		}
+		return false
+	}
+}
+
+// scopedFlagPrefixLen returns the length of a leading scoped-flag opener
+// such as "?i:" (the inside of an (?i:...) wrapper), or 0 when absent.
+func scopedFlagPrefixLen(inner string) int {
+	if !strings.HasPrefix(inner, "?") {
+		return 0
+	}
+	i := 1
+	for i < len(inner) && ((inner[i] >= 'a' && inner[i] <= 'z') || (inner[i] >= 'A' && inner[i] <= 'Z') || inner[i] == '-') {
+		i++
+	}
+	if i > 1 && i < len(inner) && inner[i] == ':' {
+		return i + 1
+	}
+	return 0
 }

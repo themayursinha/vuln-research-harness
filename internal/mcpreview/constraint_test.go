@@ -680,6 +680,27 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 		},
 
 		{
+			name:    "top-level nullable alternative still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"safe|a*"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+		{
+			name:   "fully anchored empty match stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^$"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+		{
+			name:   "fully anchored class star stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^[a-z]*$"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+		{
+			name:    "fully anchored dot star still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^(.*)$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+
+		{
 			name:    "closed tuple with viable plain slot still emits",
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"string"}],"items":false}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
