@@ -46,6 +46,19 @@ func TestReviewCategories(t *testing.T) {
 			wantLoc:  "inputSchema.properties.path",
 		},
 		{
+			name:     "filesystem source endpoint",
+			input:    toolsJSON(`{"name":"move_file","description":"Move files","inputSchema":{"properties":{"source":{"type":"string"}}}}`),
+			wantCat:  CategoryUnconstrainedPath,
+			wantTool: "move_file",
+			wantLoc:  "inputSchema.properties.source",
+		},
+		{
+			name:    "filesystem destination endpoint",
+			input:   toolsJSON(`{"name":"move_file","description":"Move files","inputSchema":{"properties":{"destination":{"type":"string"}}}}`),
+			wantCat: CategoryUnconstrainedPath,
+			wantLoc: "inputSchema.properties.destination",
+		},
+		{
 			name:     "unconstrained command",
 			input:    toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"command":{"type":"string"}}}}`),
 			wantCat:  CategoryUnconstrainedCommand,
@@ -126,6 +139,16 @@ func TestReviewConstrainedArgumentsProduceNoMatchingHypothesis(t *testing.T) {
 		{
 			name:   "path enum",
 			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","enum":["/tmp/a"]}}}}`),
+			absent: CategoryUnconstrainedPath,
+		},
+		{
+			name:   "source without filesystem description is not a path",
+			input:  toolsJSON(`{"name":"alpha","description":"Fetch a webhook","inputSchema":{"properties":{"source":{"type":"string"}}}}`),
+			absent: CategoryUnconstrainedPath,
+		},
+		{
+			name:   "filesystem source with root is constrained",
+			input:  toolsJSON(`{"name":"move_file","description":"Move files","inputSchema":{"properties":{"source":{"type":"string","root":"/tmp/sandbox"}}}}`),
 			absent: CategoryUnconstrainedPath,
 		},
 		{

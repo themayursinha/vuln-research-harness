@@ -130,8 +130,8 @@
         "type": "object",
         "required": ["source", "destination"],
         "properties": {
-          "source": { "type": "string" },
-          "destination": { "type": "string" }
+          "source": { "type": "string", "description": "Filesystem path of the file or directory to move" },
+          "destination": { "type": "string", "description": "Filesystem path of the move destination" }
         }
       }
     },

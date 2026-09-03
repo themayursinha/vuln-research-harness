@@ -8,5 +8,5 @@ families:
     mechanism: symlink inside the allowed root that resolves outside it
   - family: prefix
     mechanism: allowed-directory string-prefix matching
-  - family: roots
-    mechanism: MCP roots protocol changing allowed directories after start
+  - family: unicode
+    mechanism: Unicode NFC equivalent path components through validatePath

@@ -33,6 +33,11 @@ var (
 		"dir": {}, "directory": {}, "file": {}, "filename": {}, "filepath": {},
 		"folder": {}, "path": {}, "pathname": {},
 	}
+	// source/destination are path endpoints only when the tool already talks
+	// about a filesystem; alone they are too generic (URL source, etc.).
+	pathEndpointTokens = map[string]struct{}{
+		"destination": {}, "source": {},
+	}
 	pathFormats = map[string]struct{}{
 		"directory": {}, "file": {}, "filename": {}, "filepath": {}, "folder": {}, "path": {},
 	}
@@ -137,8 +142,11 @@ func urlCue(name string, schema map[string]any) (string, bool) {
 	return descriptionCue(schema, reURLWord)
 }
 
-func pathCue(name string, schema map[string]any) (string, bool) {
+func pathCue(name string, schema map[string]any, toolDescription string) (string, bool) {
 	if cue, ok := firstTokenMatch(name, pathNameTokens); ok {
+		return cue, true
+	}
+	if cue, ok := firstTokenMatch(name, pathEndpointTokens); ok && reFilesystem.MatchString(toolDescription) {
 		return cue, true
 	}
 	if cue, ok := formatCue(schema, pathFormats); ok {

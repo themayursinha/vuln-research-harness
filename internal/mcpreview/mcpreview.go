@@ -177,7 +177,7 @@ func reviewTool(rep *reporter, name, description string, schema map[string]any) 
 				Rationale:   "URL-like argument has no scheme, host, or enum constraint (research triage, not a confirmed vulnerability).",
 			})
 		}
-		if cue, ok := pathCue(propName, keywords); ok && eval.unconstrained(node, origin, instance, propName, constraintPath) {
+		if cue, ok := pathCue(propName, keywords, description); ok && eval.unconstrained(node, origin, instance, propName, constraintPath) {
 			rep.add(Hypothesis{
 				ToolName:    name,
 				Category:    CategoryUnconstrainedPath,

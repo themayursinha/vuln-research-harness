@@ -57,7 +57,7 @@ func TestFamiliesSeedThenFourWorkerPlan(t *testing.T) {
 		"dotdot--r1.json":  "parent-directory segments through validatePath",
 		"symlink--r1.json": "symlink inside the allowed root that resolves outside it",
 		"prefix--r1.json":  "allowed-directory string-prefix matching",
-		"roots--r1.json":   "MCP roots protocol changing allowed directories after start",
+		"unicode--r1.json": "Unicode NFC equivalent path components through validatePath",
 	}
 	for _, e := range entries {
 		mech, ok := want[e.Name()]
@@ -163,12 +163,21 @@ func TestMCPFilesystemToolsReviewEmitsUnconstrainedPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pathHits int
+	movePath := map[string]bool{}
 	for _, h := range rep.Hypotheses {
 		if h.Category == mcpreview.CategoryUnconstrainedPath {
 			pathHits++
+			if h.ToolName == "move_file" {
+				movePath[h.Location] = true
+			}
 		}
 	}
 	if pathHits < 4 {
 		t.Fatalf("want unconstrained_path hypotheses from the filesystem schema, got %d in %+v", pathHits, rep.Hypotheses)
+	}
+	for _, loc := range []string{"inputSchema.properties.source", "inputSchema.properties.destination"} {
+		if !movePath[loc] {
+			t.Fatalf("move_file missing unconstrained_path at %s in %+v", loc, rep.Hypotheses)
+		}
 	}
 }

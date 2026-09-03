@@ -53,7 +53,7 @@ this pin. That is a baseline, not a finding.
 ## Bounded four-worker round
 
 `approaches.yaml` registers four incompatible mechanisms (parent segments,
-symlink escape, prefix matching, MCP roots mutation). `vrh families seed .`
+symlink escape, prefix matching, Unicode NFC equivalents). `vrh families seed .`
 writes them to the ledger; `vrh round plan . 4` publishes one inbox request
 per family. Workers (human or isolated agent) write result envelopes into
 `inbox/results/`. Do not invent results: model prose is never evidence.
