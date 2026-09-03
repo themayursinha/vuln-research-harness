@@ -1,0 +1,12 @@
+# Four incompatible approach families for the bounded pilot round.
+# Seed with: vrh families seed . approaches.yaml
+# then:      vrh round plan . 4
+families:
+  - family: dotdot
+    mechanism: parent-directory segments through validatePath
+  - family: symlink
+    mechanism: symlink inside the allowed root that resolves outside it
+  - family: prefix
+    mechanism: allowed-directory string-prefix matching
+  - family: roots
+    mechanism: MCP roots protocol changing allowed directories after start

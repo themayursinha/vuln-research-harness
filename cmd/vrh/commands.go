@@ -16,6 +16,7 @@ import (
 	"github.com/themayursinha/vuln-research-harness/internal/manifest"
 	"github.com/themayursinha/vuln-research-harness/internal/registry"
 	"github.com/themayursinha/vuln-research-harness/internal/worker"
+	"gopkg.in/yaml.v3"
 )
 
 // roundState persists the coordinator round across CLI invocations. The
@@ -58,7 +59,7 @@ func snapshotCmd(args []string) error {
 
 func familiesCmd(args []string) error {
 	if len(args) < 2 {
-		return errors.New("families requires <add|block|reopen|list> <campaign-dir> [family] [mechanism-or-reason]")
+		return errors.New("families requires <add|block|reopen|list|seed> <campaign-dir> ...")
 	}
 	sub, dir := args[0], args[1]
 	events, _ := ledgerEventsFor(dir)
@@ -117,9 +118,72 @@ func familiesCmd(args []string) error {
 			fmt.Printf("%-8s %-20s attempts=%d  %s\n", approach.Status, approach.Family, approach.Attempts, approach.Mechanism)
 		}
 		return nil
+	case "seed":
+		if len(args) < 2 || len(args) > 3 {
+			return errors.New("families seed requires <campaign-dir> [approaches.yaml]")
+		}
+		seedPath := filepath.Join(dir, "approaches.yaml")
+		if len(args) == 3 {
+			seedPath = args[2]
+		}
+		return seedFamilies(dir, reg, seedPath)
 	default:
 		return fmt.Errorf("unknown families subcommand %q", sub)
 	}
+}
+
+type familySeedFile struct {
+	Families []familySeed `yaml:"families"`
+}
+
+type familySeed struct {
+	Family    string `yaml:"family"`
+	Mechanism string `yaml:"mechanism"`
+}
+
+func seedFamilies(dir string, reg *registry.Registry, seedPath string) error {
+	data, err := os.ReadFile(seedPath)
+	if err != nil {
+		return fmt.Errorf("read approaches: %w", err)
+	}
+	var seed familySeedFile
+	if err := yaml.Unmarshal(data, &seed); err != nil {
+		return fmt.Errorf("parse approaches: %w", err)
+	}
+	if len(seed.Families) == 0 {
+		return errors.New("approaches.yaml has no families")
+	}
+	seen := map[string]struct{}{}
+	for i, item := range seed.Families {
+		if strings.TrimSpace(item.Family) == "" || strings.TrimSpace(item.Mechanism) == "" {
+			return fmt.Errorf("approaches.yaml family %d needs family and mechanism", i+1)
+		}
+		if err := registry.ValidateFamilyName(item.Family); err != nil {
+			return err
+		}
+		if _, dup := seen[item.Family]; dup {
+			return fmt.Errorf("duplicate family %q in approaches.yaml", item.Family)
+		}
+		seen[item.Family] = struct{}{}
+		if _, exists := reg.Get(item.Family); exists {
+			return fmt.Errorf("approach family %q already exists", item.Family)
+		}
+	}
+	var names []string
+	for _, item := range seed.Families {
+		if err := reg.Add(item.Family, item.Mechanism); err != nil {
+			return err
+		}
+		if err := appendFamilyEvent(dir, "family:"+item.Family, "family_added", item.Family, map[string]string{"mechanism": item.Mechanism}); err != nil {
+			return err
+		}
+		names = append(names, item.Family)
+	}
+	if err := reg.Save(dir); err != nil {
+		return err
+	}
+	fmt.Printf("seeded %d families: %s\n", len(names), strings.Join(names, ", "))
+	return nil
 }
 
 func appendFamilyEvent(dir, id, eventType, family string, data map[string]string) error {

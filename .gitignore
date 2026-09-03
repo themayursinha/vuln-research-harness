@@ -34,6 +34,8 @@ campaigns/mcp-filesystem/**
 !campaigns/mcp-filesystem/Dockerfile
 !campaigns/mcp-filesystem/campaign.yaml
 !campaigns/mcp-filesystem/cases.yaml
+!campaigns/mcp-filesystem/approaches.yaml
+!campaigns/mcp-filesystem/tools.json
 !campaigns/mcp-filesystem/manifest.json
 !campaigns/mcp-filesystem/source.tar.gz
 !campaigns/mcp-filesystem/scripts/

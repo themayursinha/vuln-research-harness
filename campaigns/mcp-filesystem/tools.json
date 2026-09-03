@@ -1,0 +1,100 @@
+{
+  "tools": [
+    {
+      "name": "read_text_file",
+      "description": "Read the complete contents of a file from the file system as text. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "tail": { "type": "number" },
+          "head": { "type": "number" }
+        }
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Create a new file or completely overwrite an existing file. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path", "content"],
+        "properties": {
+          "path": { "type": "string" },
+          "content": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "edit_file",
+      "description": "Make line-based edits to a text file. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path", "edits"],
+        "properties": {
+          "path": { "type": "string" },
+          "edits": { "type": "array" },
+          "dryRun": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "create_directory",
+      "description": "Create a new directory. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "list_directory",
+      "description": "List a directory. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "move_file",
+      "description": "Move a file. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["source", "destination"],
+        "properties": {
+          "source": { "type": "string" },
+          "destination": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "search_files",
+      "description": "Recursively search for files. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path", "pattern"],
+        "properties": {
+          "path": { "type": "string" },
+          "pattern": { "type": "string" },
+          "excludePatterns": { "type": "array" }
+        }
+      }
+    },
+    {
+      "name": "get_file_info",
+      "description": "Retrieve file metadata. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" }
+        }
+      }
+    }
+  ]
+}
