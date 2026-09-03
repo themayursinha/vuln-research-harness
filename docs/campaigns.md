@@ -44,7 +44,13 @@ vrh campaign status campaigns/<name>   # round, families, outstanding requests, 
 contract must load and validate, the campaign `source_snapshot` must equal
 the manifest digest, and the source tree must still verify against the
 manifest — including a check that no file was added or removed since the
-snapshot. A directory with families but no valid authorized contract never
+snapshot.
+
+Reference campaigns in this repository: `campaigns/fixture-lab` (synthetic
+path-join lab) and `campaigns/mcp-filesystem` (pinned official filesystem
+MCP server with a synthetic allowed root). See each directory's README.
+
+A directory with families but no valid authorized contract never
 dispatches work. `vrh repro` additionally extracts a fresh copy of the pinned
 archive for each case and runs the script in a digest-pinned local
 container (`--network=none`, read-only snapshot mount, `--pull=never`).
