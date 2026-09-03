@@ -10,6 +10,8 @@ MCP, no real files, no external network.
 ```
 source/           pinned snapshot (upstream TS, lockfile, synthetic sandbox/outside)
 scripts/          hypothesis probe (host-mounted into the container)
+tools.json        sanitized MCP tool schemas from this pin (offline triage)
+approaches.yaml   four incompatible families for a bounded worker round
 cases.yaml        reproduction cases for vrh repro
 campaign.yaml     contract (digest-pinned container image)
 Dockerfile        Node runtime for compile + probe
@@ -29,8 +31,11 @@ cd campaigns/mcp-filesystem
 
 ../../vrh validate campaign.yaml
 ../../vrh verify-sandbox .
-../../vrh repro cases.yaml .
+../../vrh review-mcp-schema tools.json
+../../vrh families seed .
+../../vrh round plan . 4
 ../../vrh campaign status .
+../../vrh repro cases.yaml .
 ```
 
 `make mcp-filesystem-image` uses `cmd/fixture-image` with
@@ -44,6 +49,17 @@ server's `validatePath` while the allowed root is `sandbox/`. The probe
 calls that upstream function; it prints `MCPFS-ROOT-ESCAPE` only if the
 synthetic secret is returned. A non-reproduction means confinement held on
 this pin. That is a baseline, not a finding.
+
+## Bounded four-worker round
+
+`approaches.yaml` registers four incompatible mechanisms (parent segments,
+symlink escape, prefix matching, Unicode NFC equivalents). `vrh families seed .`
+writes them to the ledger; `vrh round plan . 4` publishes one inbox request
+per family. Workers (human or isolated agent) write result envelopes into
+`inbox/results/`. Do not invent results: model prose is never evidence.
+
+`tools.json` is a sanitized copy of this pin's tool schemas for
+`vrh review-mcp-schema`. Hypotheses are triage, not findings.
 
 ## License
 

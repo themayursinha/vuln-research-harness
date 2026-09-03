@@ -28,8 +28,10 @@
 
 - [x] Reference fixture campaign (`campaigns/fixture-lab`)
 - [x] Choose one authorized open-source MCP server with a local fixture
-      (`campaigns/mcp-filesystem`: official filesystem MCP server)
-- [ ] Run a bounded four-worker campaign
+      (`campaigns/mcp-filesystem`: official filesystem server)
+- [ ] Seed and dispatch a bounded four-worker campaign
+      (`vrh families seed` + `vrh round plan . 4`; workers still write
+      result envelopes through the inbox — no fabricated evidence)
 - [ ] Measure approach diversity, false positives, evidence completeness,
       runtime, and model cost
 - [ ] Publish a methodology note only after the workflow is reproducible

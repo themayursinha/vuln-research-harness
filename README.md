@@ -13,7 +13,8 @@ impact.
 ledger, coordinator round loop, container-backed reproduction (`vrh repro`),
 sandbox verification, and adversarial validation. Local fixtures exist for a
 synthetic path-join lab and a pinned official filesystem MCP server. Next: a
-bounded four-worker campaign against that MCP fixture, then measurement.
+bounded four-worker campaign against that MCP fixture (four approach
+families, schema triage, `vrh round plan . 4`), then measurement.
 An automated agent runner and microVM adapter are not built yet.
 See [docs/roadmap.md](docs/roadmap.md) and [docs/campaigns.md](docs/campaigns.md).
 
@@ -80,8 +81,9 @@ vrh validate ./campaigns/mcp-filesystem-server/campaign.yaml
 vrh snapshot /path/to/target ./campaigns/mcp-filesystem-server
 
 # Manage approach families
-vrh families add ./campaigns/mcp-filesystem-server parser "validation ordering"
-vrh families list ./campaigns/mcp-filesystem-server
+vrh families add ./campaigns/mcp-filesystem parser "parent-directory segments"
+vrh families seed ./campaigns/mcp-filesystem
+vrh families list ./campaigns/mcp-filesystem
 
 # Run a bounded round: publish request envelopes, execute externally in
 # isolation, then ingest validated results

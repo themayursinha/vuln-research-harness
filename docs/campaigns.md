@@ -29,6 +29,10 @@ vrh families add campaigns/<name> parser "request validation ordering"
 vrh families add campaigns/<name> auth   "identity confusion"
 vrh families add campaigns/<name> cache  "cache poisoning"
 
+# or seed a documented set (mcp-filesystem ships approaches.yaml)
+vrh families seed campaigns/<name>
+vrh families seed campaigns/<name> approaches.yaml
+
 vrh round plan campaigns/<name> 3      # publishes request envelopes
 # workers execute in their own isolation; each returns a result envelope
 # with capability claims into inbox/results/

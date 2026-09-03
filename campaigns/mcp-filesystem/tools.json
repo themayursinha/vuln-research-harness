@@ -1,0 +1,170 @@
+{
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read the complete contents of a file as text. DEPRECATED: Use read_text_file instead. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "tail": { "type": "number" },
+          "head": { "type": "number" }
+        }
+      }
+    },
+    {
+      "name": "read_text_file",
+      "description": "Read the complete contents of a file from the file system as text. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "tail": { "type": "number" },
+          "head": { "type": "number" }
+        }
+      }
+    },
+    {
+      "name": "read_media_file",
+      "description": "Read a file and return it as a base64-encoded content block. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "read_multiple_files",
+      "description": "Read the contents of multiple files simultaneously. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["paths"],
+        "properties": {
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    {
+      "name": "write_file",
+      "description": "Create a new file or completely overwrite an existing file. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path", "content"],
+        "properties": {
+          "path": { "type": "string" },
+          "content": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "edit_file",
+      "description": "Make line-based edits to a text file. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path", "edits"],
+        "properties": {
+          "path": { "type": "string" },
+          "edits": { "type": "array" },
+          "dryRun": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "create_directory",
+      "description": "Create a new directory. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "list_directory",
+      "description": "Get a detailed listing of all files and directories in a specified path. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "list_directory_with_sizes",
+      "description": "Get a detailed listing of all files and directories in a specified path, including sizes. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "sortBy": { "type": "string", "enum": ["name", "size"] }
+        }
+      }
+    },
+    {
+      "name": "directory_tree",
+      "description": "Get a recursive tree view of files and directories as a JSON structure. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" },
+          "excludePatterns": { "type": "array" }
+        }
+      }
+    },
+    {
+      "name": "move_file",
+      "description": "Move or rename files and directories. Both source and destination must be within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["source", "destination"],
+        "properties": {
+          "source": { "type": "string", "description": "Filesystem path of the file or directory to move" },
+          "destination": { "type": "string", "description": "Filesystem path of the move destination" }
+        }
+      }
+    },
+    {
+      "name": "search_files",
+      "description": "Recursively search for files and directories matching a pattern. Only searches within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path", "pattern"],
+        "properties": {
+          "path": { "type": "string" },
+          "pattern": { "type": "string" },
+          "excludePatterns": { "type": "array" }
+        }
+      }
+    },
+    {
+      "name": "get_file_info",
+      "description": "Retrieve detailed metadata about a file or directory. Only works within allowed directories.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "list_allowed_directories",
+      "description": "Returns the list of directories that this server is allowed to access. Subdirectories within these allowed directories are also accessible.",
+      "inputSchema": {
+        "type": "object"
+      }
+    }
+  ]
+}

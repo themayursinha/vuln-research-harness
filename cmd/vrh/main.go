@@ -76,7 +76,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  vrh init <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh validate <campaign.yaml>")
 	fmt.Fprintln(os.Stderr, "  vrh snapshot <source-dir> <campaign-dir>")
-	fmt.Fprintln(os.Stderr, "  vrh families <add|block|reopen|list> <campaign-dir> ...")
+	fmt.Fprintln(os.Stderr, "  vrh families <add|block|reopen|list|seed> <campaign-dir> ...")
 	fmt.Fprintln(os.Stderr, "  vrh round plan <campaign-dir> <max-workers>")
 	fmt.Fprintln(os.Stderr, "  vrh round ingest <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh repro <cases.yaml> <campaign-dir>")
