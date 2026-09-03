@@ -37,14 +37,180 @@ func (e *constraintEval) has(node schemaNode, kind constraintKind) bool {
 // unconstrained reports whether node/origin can carry a string-like value of
 // kind and lacks a constraint. Incompatible declared types (boolean, number,
 // integer, null) suppress emission even when the property name cues kind.
-func (e *constraintEval) unconstrained(node, origin schemaNode, kind constraintKind) bool {
+// When instance is an object schema and propName is set, constraints are
+// taken from the effective schema for that property on the instance (so
+// sibling allOf/anyOf/additionalProperties apply).
+func (e *constraintEval) unconstrained(node, origin, instance schemaNode, propName string, kind constraintKind) bool {
 	if !e.viableForKind(origin, kind, 0) {
 		return false
 	}
 	if !e.viableForKind(node, kind, 0) {
 		return false
 	}
+	if instance.kind != schemaInvalid && propName != "" {
+		e.visited = 0
+		clear(e.active)
+		clear(e.activeRefs)
+		if e.propertyForbidden(instance, propName, 0) {
+			return false
+		}
+		return !e.propertyHas(instance, propName, kind, 0)
+	}
 	return !e.has(origin, kind)
+}
+
+func (e *constraintEval) propertyHas(node schemaNode, name string, kind constraintKind, depth int) bool {
+	if node.kind == schemaInvalid {
+		return false
+	}
+	if depth >= maxConstraintDepth || e.visited >= maxVisitedNodes {
+		return false
+	}
+	if node.kind == schemaFalse {
+		e.visited++
+		return true
+	}
+	if node.kind == schemaTrue {
+		e.visited++
+		return false
+	}
+	obj := node.obj
+	id := fmt.Sprintf("prop:%p:%s:%d", obj, name, kind)
+	if _, looping := e.active[id]; looping {
+		return false
+	}
+	e.visited++
+	e.active[id] = struct{}{}
+	defer delete(e.active, id)
+
+	if props, ok := asObject(obj["properties"]); ok {
+		if child, ok := asSchema(props[name]); ok && propertySchemaHas(e.root, child, kind) {
+			return true
+		}
+	}
+	matchedPattern := false
+	if patterns, ok := asObject(obj["patternProperties"]); ok {
+		for _, pat := range sortedKeys(patterns) {
+			if !patternMatchesName(pat, name) {
+				continue
+			}
+			matchedPattern = true
+			if child, ok := asSchema(patterns[pat]); ok && propertySchemaHas(e.root, child, kind) {
+				return true
+			}
+		}
+	}
+	if !propertyDeclared(obj, name) && !matchedPattern {
+		if add, exists := obj["additionalProperties"]; exists {
+			if child, ok := asSchema(add); ok && propertySchemaHas(e.root, child, kind) {
+				return true
+			}
+		}
+	}
+	if ref, ok := obj["$ref"].(string); ok {
+		if _, looping := e.activeRefs[ref]; !looping {
+			if target, ok := resolveLocalRef(e.root, ref); ok {
+				e.activeRefs[ref] = struct{}{}
+				found := e.propertyHas(target, name, kind, depth+1)
+				delete(e.activeRefs, ref)
+				if found {
+					return true
+				}
+			}
+		}
+	}
+	for _, b := range schemaBranches(obj["allOf"]) {
+		if e.propertyHas(b, name, kind, depth+1) {
+			return true
+		}
+	}
+	for _, key := range []string{"anyOf", "oneOf"} {
+		branches := schemaBranches(obj[key])
+		if len(branches) == 0 {
+			continue
+		}
+		all := true
+		anyOpen := false
+		for _, b := range branches {
+			if e.propertyForbidden(b, name, depth+1) {
+				continue
+			}
+			anyOpen = true
+			if !e.propertyHas(b, name, kind, depth+1) {
+				all = false
+				break
+			}
+		}
+		if anyOpen && all {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *constraintEval) propertyForbidden(node schemaNode, name string, depth int) bool {
+	if depth >= maxConstraintDepth {
+		return false
+	}
+	if node.kind == schemaFalse {
+		return true
+	}
+	if node.kind != schemaObject {
+		return false
+	}
+	obj := node.obj
+	if propertyDeclared(obj, name) || patternPropertyMatches(obj, name) {
+		return false
+	}
+	if add, exists := obj["additionalProperties"]; exists {
+		if child, ok := asSchema(add); ok && child.kind == schemaFalse {
+			return true
+		}
+	}
+	if ref, ok := obj["$ref"].(string); ok {
+		if _, looping := e.activeRefs[ref]; !looping {
+			if target, ok := resolveLocalRef(e.root, ref); ok {
+				e.activeRefs[ref] = struct{}{}
+				forbidden := e.propertyForbidden(target, name, depth+1)
+				delete(e.activeRefs, ref)
+				if forbidden {
+					return true
+				}
+			}
+		}
+	}
+	for _, b := range schemaBranches(obj["allOf"]) {
+		if e.propertyForbidden(b, name, depth+1) {
+			return true
+		}
+	}
+	return false
+}
+
+func propertyDeclared(obj map[string]any, name string) bool {
+	props, ok := asObject(obj["properties"])
+	if !ok {
+		return false
+	}
+	_, exists := props[name]
+	return exists
+}
+
+func patternPropertyMatches(obj map[string]any, name string) bool {
+	patterns, ok := asObject(obj["patternProperties"])
+	if !ok {
+		return false
+	}
+	for _, pat := range sortedKeys(patterns) {
+		if patternMatchesName(pat, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func propertySchemaHas(root map[string]any, child schemaNode, kind constraintKind) bool {
+	return newConstraintEval(root).has(child, kind)
 }
 
 func (e *constraintEval) search(node schemaNode, kind constraintKind, depth int) bool {

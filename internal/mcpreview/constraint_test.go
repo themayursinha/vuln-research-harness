@@ -668,9 +668,49 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
+			name:   "required-only url with additionalProperties false is not an argument",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"required":["url"],"additionalProperties":false}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "required-only url constrained by patternProperties",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"required":["url"],"patternProperties":{"^url$":{"enum":["https://safe.invalid"]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
 			name:    "dependentSchemas nested url is visited",
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"dependentSchemas":{"mode":{"properties":{"url":{"type":"string"}}}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.dependentSchemas.mode.properties.url"}},
+		},
+		{
+			name:   "dependentSchemas does not unconstrain parent enum",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"enum":["https://safe.invalid"]}},"dependentSchemas":{"mode":{"properties":{"url":{"type":"string"}}}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}, {CategoryUnconstrainedURL, "inputSchema.dependentSchemas.mode.properties.url"}},
+		},
+		{
+			name:   "object-level allOf sibling enum constrains property",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"allOf":[{"properties":{"url":{"type":"string"}}},{"properties":{"url":{"enum":["https://safe.invalid"]}}}]}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.allOf[0].properties.url"}, {CategoryUnconstrainedURL, "inputSchema.allOf[1].properties.url"}},
+		},
+		{
+			name:    "object-level anyOf empty branch still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"anyOf":[{"properties":{"target":{"format":"uri","enum":["https://safe.invalid"]}}},{}]}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.anyOf[0].properties.target"}},
+		},
+		{
+			name:   "ref to object keeps nested property enum",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"payload":{"$ref":"#/$defs/Obj"}},"$defs":{"Obj":{"properties":{"url":{"enum":["https://safe.invalid"]}}}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.payload.properties.url"}},
+		},
+		{
+			name:    "ref to object still emits nested unconstrained url",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"payload":{"$ref":"#/$defs/Obj"}},"$defs":{"Obj":{"properties":{"url":{"type":"string"}}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.payload.properties.url"}},
+		},
+		{
+			name:    "invalid json pointer tilde escape is not a constraint",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"$ref":"#/$defs/foo~2bar"}},"$defs":{"foo~2bar":{"enum":["https://safe.invalid"]}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
 		},
 		{
 			name:   "array enum covers item format cues",
@@ -794,18 +834,23 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 
 func TestDecodeJSONPointerTokenRFC6901(t *testing.T) {
 	tests := []struct {
-		in, want string
+		in   string
+		want string
+		ok   bool
 	}{
-		{in: "foo", want: "foo"},
-		{in: "foo~1bar", want: "foo/bar"},
-		{in: "foo~0bar", want: "foo~bar"},
-		{in: "foo~0~1bar", want: "foo~/bar"},
-		{in: "~01", want: "~1"},
-		{in: "~10", want: "/0"},
+		{in: "foo", want: "foo", ok: true},
+		{in: "foo~1bar", want: "foo/bar", ok: true},
+		{in: "foo~0bar", want: "foo~bar", ok: true},
+		{in: "foo~0~1bar", want: "foo~/bar", ok: true},
+		{in: "~01", want: "~1", ok: true},
+		{in: "~10", want: "/0", ok: true},
+		{in: "foo~2bar", ok: false},
+		{in: "foo~", ok: false},
 	}
 	for _, tt := range tests {
-		if got := decodeJSONPointerToken(tt.in); got != tt.want {
-			t.Fatalf("decodeJSONPointerToken(%q)=%q want %q", tt.in, got, tt.want)
+		got, ok := decodeJSONPointerToken(tt.in)
+		if ok != tt.ok || (tt.ok && got != tt.want) {
+			t.Fatalf("decodeJSONPointerToken(%q)=(%q,%v) want (%q,%v)", tt.in, got, ok, tt.want, tt.ok)
 		}
 	}
 }

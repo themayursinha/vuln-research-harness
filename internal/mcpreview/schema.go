@@ -3,6 +3,7 @@ package mcpreview
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,11 +53,12 @@ func (n schemaNode) keywords() map[string]any {
 	return n.obj
 }
 
-type schemaVisitor func(loc, propName string, node, origin schemaNode)
+type schemaVisitor func(loc, propName string, node, origin, instance schemaNode)
 
 type walkFrame struct {
 	node     schemaNode
 	origin   schemaNode
+	instance schemaNode
 	loc      string
 	propName string
 	depth    int
@@ -81,6 +83,20 @@ func (f walkFrame) cueSite() (loc, name string) {
 	return f.loc, f.propName
 }
 
+// objectInstance is the enclosing object schema for this frame when instance
+// was not set explicitly. Named-property frames still carry the parent object
+// in instance so composition inspect can see sibling constraints; nested
+// properties of that value are assigned in walkApplicators.
+func (f walkFrame) objectInstance() schemaNode {
+	if f.instance.kind != schemaInvalid {
+		return f.instance
+	}
+	if f.propName == "" && f.origin.kind != schemaInvalid {
+		return f.origin
+	}
+	return f.node
+}
+
 type schemaWalker struct {
 	root       map[string]any
 	visit      schemaVisitor
@@ -101,9 +117,11 @@ func walkSchema(schema map[string]any, loc string, visit schemaVisitor) (truncat
 		active:     map[string]struct{}{},
 		activeRefs: map[string]struct{}{},
 	}
+	root := schemaNode{kind: schemaObject, obj: schema}
 	w.enter(walkFrame{
-		node: schemaNode{kind: schemaObject, obj: schema},
-		loc:  loc,
+		node:     root,
+		instance: root,
+		loc:      loc,
 	}, false)
 	return w.truncated, w.limitHit
 }
@@ -143,12 +161,12 @@ func (w *schemaWalker) enter(f walkFrame, callVisit bool) {
 
 func (w *schemaWalker) visitFrame(f walkFrame, callVisit bool) {
 	if callVisit {
-		w.visit(f.loc, f.propName, f.node, f.constraint())
+		w.visit(f.loc, f.propName, f.node, f.constraint(), f.instance)
 		return
 	}
 	if f.inspect {
 		cueLoc, cueName := f.cueSite()
-		w.visit(cueLoc, cueName, f.node, f.constraint())
+		w.visit(cueLoc, cueName, f.node, f.constraint(), f.instance)
 	}
 }
 
@@ -168,6 +186,7 @@ func (w *schemaWalker) followRef(obj map[string]any, f walkFrame, callVisit bool
 	w.enter(walkFrame{
 		node:     target,
 		origin:   f.constraint(),
+		instance: f.instance,
 		loc:      f.loc,
 		propName: f.propName,
 		depth:    f.depth + 1,
@@ -181,6 +200,18 @@ func (w *schemaWalker) followRef(obj map[string]any, f walkFrame, callVisit bool
 func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectBranches bool) {
 	loc := f.loc
 	depth := f.depth
+	// Nested properties belong to this schema when the frame is already a
+	// named property's value ($ref target, items object, etc.). Composition
+	// inspect of a property value keeps the enclosing object so sibling
+	// allOf/anyOf constraints still apply at the cue site.
+	nestedObject := f.objectInstance()
+	if f.propName != "" {
+		nestedObject = f.node
+	}
+	composeInst := f.instance
+	if composeInst.kind == schemaInvalid {
+		composeInst = f.objectInstance()
+	}
 	declared, _ := asObject(obj["properties"])
 	if declared != nil {
 		for _, name := range sortedKeys(declared) {
@@ -193,15 +224,17 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 				loc:      loc + ".properties." + name,
 				propName: name,
 				depth:    depth + 1,
+				instance: nestedObject,
 			}, true)
 		}
 	}
 	for _, name := range requiredOnlyNames(obj, declared) {
 		w.enter(walkFrame{
-			node:     schemaNode{kind: schemaObject, obj: map[string]any{}},
+			node:     schemaForUndeclaredProperty(obj, name),
 			loc:      loc + ".properties." + name,
 			propName: name,
 			depth:    depth + 1,
+			instance: nestedObject,
 		}, true)
 	}
 	if patterns, ok := asObject(obj["patternProperties"]); ok {
@@ -275,6 +308,7 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 			w.enter(walkFrame{
 				node:     child,
 				origin:   f.constraint(),
+				instance: composeInst,
 				loc:      fmt.Sprintf("%s.%s[%d]", loc, key, i),
 				propName: "",
 				depth:    depth + 1,
@@ -292,6 +326,8 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 			}
 			w.enter(walkFrame{
 				node:     child,
+				origin:   composeInst,
+				instance: composeInst,
 				loc:      loc + ".dependentSchemas." + name,
 				propName: "",
 				depth:    depth + 1,
@@ -307,6 +343,8 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 		}
 		w.enter(walkFrame{
 			node:     child,
+			origin:   composeInst,
+			instance: composeInst,
 			loc:      loc + "." + key,
 			propName: "",
 			depth:    depth + 1,
@@ -359,6 +397,56 @@ func requiredOnlyNames(obj, declared map[string]any) []string {
 	return names
 }
 
+// schemaForUndeclaredProperty is the schema that applies to a required name
+// that has no properties entry: matching patternProperties, else
+// additionalProperties (including boolean false), else an empty object.
+func schemaForUndeclaredProperty(obj map[string]any, name string) schemaNode {
+	var matched []schemaNode
+	if patterns, ok := asObject(obj["patternProperties"]); ok {
+		for _, pat := range sortedKeys(patterns) {
+			if !patternMatchesName(pat, name) {
+				continue
+			}
+			child, ok := asSchema(patterns[pat])
+			if ok {
+				matched = append(matched, child)
+			}
+		}
+	}
+	switch len(matched) {
+	case 1:
+		return matched[0]
+	case 0:
+	default:
+		arr := make([]any, len(matched))
+		for i, m := range matched {
+			switch m.kind {
+			case schemaTrue:
+				arr[i] = true
+			case schemaFalse:
+				arr[i] = false
+			default:
+				arr[i] = m.obj
+			}
+		}
+		return schemaNode{kind: schemaObject, obj: map[string]any{"allOf": arr}}
+	}
+	if add, ok := obj["additionalProperties"]; ok {
+		if child, ok := asSchema(add); ok {
+			return child
+		}
+	}
+	return schemaNode{kind: schemaObject, obj: map[string]any{}}
+}
+
+func patternMatchesName(pat, name string) bool {
+	re, err := regexp.Compile(pat)
+	if err != nil {
+		return false
+	}
+	return re.MatchString(name)
+}
+
 func resolveLocalRef(root map[string]any, ref string) (schemaNode, bool) {
 	pointer, ok := localJSONPointer(ref)
 	if !ok {
@@ -393,7 +481,10 @@ func evalJSONPointer(root map[string]any, pointer string) (schemaNode, bool) {
 	}
 	var cur any = root
 	for _, part := range strings.Split(pointer, "/")[1:] {
-		token := decodeJSONPointerToken(part)
+		token, ok := decodeJSONPointerToken(part)
+		if !ok {
+			return schemaNode{}, false
+		}
 		next, ok := jsonPointerStep(cur, token)
 		if !ok {
 			return schemaNode{}, false
@@ -430,10 +521,27 @@ func jsonPointerIndex(token string) (int, bool) {
 	return i, true
 }
 
-func decodeJSONPointerToken(token string) string {
-	token = strings.ReplaceAll(token, "~1", "/")
-	token = strings.ReplaceAll(token, "~0", "~")
-	return token
+func decodeJSONPointerToken(token string) (string, bool) {
+	var b strings.Builder
+	for i := 0; i < len(token); i++ {
+		if token[i] != '~' {
+			b.WriteByte(token[i])
+			continue
+		}
+		if i+1 >= len(token) {
+			return "", false
+		}
+		switch token[i+1] {
+		case '0':
+			b.WriteByte('~')
+		case '1':
+			b.WriteByte('/')
+		default:
+			return "", false
+		}
+		i++
+	}
+	return b.String(), true
 }
 
 func (w *schemaWalker) noteTruncation(limit string) {
