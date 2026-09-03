@@ -39,8 +39,8 @@ func TestFamiliesSeedThenFourWorkerPlan(t *testing.T) {
 	if err := familiesCmd([]string{"seed", campaignDir, seedPath}); err != nil {
 		t.Fatal(err)
 	}
-	if err := familiesCmd([]string{"seed", campaignDir, seedPath}); err == nil {
-		t.Fatal("second seed must refuse existing families")
+	if err := familiesCmd([]string{"seed", campaignDir, seedPath}); err != nil {
+		t.Fatalf("identical re-seed must be recoverable, got %v", err)
 	}
 	if err := roundPlanCmd([]string{campaignDir, "4"}); err != nil {
 		t.Fatal(err)
@@ -76,6 +76,72 @@ func TestFamiliesSeedThenFourWorkerPlan(t *testing.T) {
 		}
 		if req.Round != 1 {
 			t.Fatalf("%s round=%d", e.Name(), req.Round)
+		}
+	}
+}
+
+func TestFamiliesSeedResumesAfterPartialAppend(t *testing.T) {
+	campaignDir, _ := setupCampaign(t)
+	seedPath := campaignFixture(t, "approaches.yaml")
+	if err := familiesCmd([]string{"add", campaignDir, "dotdot", "parent-directory segments through validatePath"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := familiesCmd([]string{"seed", campaignDir, seedPath}); err != nil {
+		t.Fatal(err)
+	}
+	if err := roundPlanCmd([]string{campaignDir, "4"}); err != nil {
+		t.Fatal(err)
+	}
+	reqDir := filepath.Join(campaignDir, "inbox", "requests")
+	entries, err := os.ReadDir(reqDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 4 {
+		t.Fatalf("want 4 request envelopes after partial seed recovery, got %d", len(entries))
+	}
+}
+
+func TestFamiliesSeedRejectsMechanismConflict(t *testing.T) {
+	campaignDir, _ := setupCampaign(t)
+	if err := familiesCmd([]string{"add", campaignDir, "dotdot", "some other mechanism"}); err != nil {
+		t.Fatal(err)
+	}
+	err := familiesCmd([]string{"seed", campaignDir, campaignFixture(t, "approaches.yaml")})
+	if err == nil {
+		t.Fatal("seed must refuse a family that already exists with a different mechanism")
+	}
+}
+
+func TestMCPFilesystemToolsJSONCoversEveryRegisteredTool(t *testing.T) {
+	want := []string{
+		"read_file", "read_text_file", "read_media_file", "read_multiple_files",
+		"write_file", "edit_file", "create_directory", "list_directory",
+		"list_directory_with_sizes", "directory_tree", "move_file", "search_files",
+		"get_file_info", "list_allowed_directories",
+	}
+	data, err := os.ReadFile(campaignFixture(t, "tools.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, tool := range doc.Tools {
+		got[tool.Name] = true
+	}
+	if len(doc.Tools) != len(want) {
+		t.Fatalf("tools.json has %d tools, pin registers %d", len(doc.Tools), len(want))
+	}
+	for _, name := range want {
+		if !got[name] {
+			t.Fatalf("tools.json missing registered tool %q", name)
 		}
 	}
 }

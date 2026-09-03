@@ -165,12 +165,15 @@ func seedFamilies(dir string, reg *registry.Registry, seedPath string) error {
 			return fmt.Errorf("duplicate family %q in approaches.yaml", item.Family)
 		}
 		seen[item.Family] = struct{}{}
-		if _, exists := reg.Get(item.Family); exists {
-			return fmt.Errorf("approach family %q already exists", item.Family)
+		if existing, exists := reg.Get(item.Family); exists && existing.Mechanism != item.Mechanism {
+			return fmt.Errorf("approach family %q already exists with mechanism %q, seed has %q", item.Family, existing.Mechanism, item.Mechanism)
 		}
 	}
 	var names []string
 	for _, item := range seed.Families {
+		if _, exists := reg.Get(item.Family); exists {
+			continue
+		}
 		if err := reg.Add(item.Family, item.Mechanism); err != nil {
 			return err
 		}
@@ -181,6 +184,10 @@ func seedFamilies(dir string, reg *registry.Registry, seedPath string) error {
 	}
 	if err := reg.Save(dir); err != nil {
 		return err
+	}
+	if len(names) == 0 {
+		fmt.Printf("seeded 0 families: all %d already present\n", len(seed.Families))
+		return nil
 	}
 	fmt.Printf("seeded %d families: %s\n", len(names), strings.Join(names, ", "))
 	return nil
