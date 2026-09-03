@@ -365,6 +365,10 @@ func ingestedIDs(events []ledger.Event) map[string]bool {
 	return ids
 }
 
+func requestGoal(family, mechanism string) string {
+	return "investigate " + family + " via " + mechanism + " for primitives matching the campaign success criterion"
+}
+
 func roundPlanCmd(args []string) error {
 	if len(args) != 2 {
 		return errors.New("round plan requires <campaign-dir> <max-workers>")
@@ -513,12 +517,17 @@ func roundPlanCmd(args []string) error {
 		return err
 	}
 	for _, family := range todo {
+		approach, ok := reg.Get(family)
+		if !ok || strings.TrimSpace(approach.Mechanism) == "" {
+			return fmt.Errorf("approach family %q has no registered mechanism", family)
+		}
 		requestID := fmt.Sprintf("%s--r%d", family, coord.Round)
 		request := worker.Request{
-			ID:     requestID,
-			Round:  coord.Round,
-			Family: family,
-			Goal:   "investigate " + family + " for primitives matching the campaign success criterion",
+			ID:      requestID,
+			Round:   coord.Round,
+			Family:  family,
+			Goal:    requestGoal(family, approach.Mechanism),
+			Context: []string{approach.Mechanism},
 		}
 		digest, err := inbox.Publish(request)
 		if err != nil {

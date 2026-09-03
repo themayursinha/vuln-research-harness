@@ -53,14 +53,15 @@ func TestFamiliesSeedThenFourWorkerPlan(t *testing.T) {
 	if len(entries) != 4 {
 		t.Fatalf("want 4 request envelopes, got %d", len(entries))
 	}
-	want := map[string]bool{
-		"dotdot--r1.json":  true,
-		"symlink--r1.json": true,
-		"prefix--r1.json":  true,
-		"roots--r1.json":   true,
+	want := map[string]string{
+		"dotdot--r1.json":  "parent-directory segments through validatePath",
+		"symlink--r1.json": "symlink inside the allowed root that resolves outside it",
+		"prefix--r1.json":  "allowed-directory string-prefix matching",
+		"roots--r1.json":   "MCP roots protocol changing allowed directories after start",
 	}
 	for _, e := range entries {
-		if !want[e.Name()] {
+		mech, ok := want[e.Name()]
+		if !ok {
 			t.Fatalf("unexpected envelope %s", e.Name())
 		}
 		raw, err := os.ReadFile(filepath.Join(reqDir, e.Name()))
@@ -76,6 +77,12 @@ func TestFamiliesSeedThenFourWorkerPlan(t *testing.T) {
 		}
 		if req.Round != 1 {
 			t.Fatalf("%s round=%d", e.Name(), req.Round)
+		}
+		if req.Goal != requestGoal(req.Family, mech) {
+			t.Fatalf("%s goal=%q missing mechanism %q", e.Name(), req.Goal, mech)
+		}
+		if len(req.Context) != 1 || req.Context[0] != mech {
+			t.Fatalf("%s context=%v want [%q]", e.Name(), req.Context, mech)
 		}
 	}
 }
