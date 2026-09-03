@@ -659,6 +659,27 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 		},
 
 		{
+			name:    "negative lookahead marker still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(?!https://)"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "positive lookahead marker stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(?=https://)"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "nullable path pattern still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"a*"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+		{
+			name:    "nullable command pattern still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"command":{"type":"string","pattern":"(foo)?"}}}}`),
+			present: []locCat{{CategoryUnconstrainedCommand, cmdLoc}},
+		},
+
+		{
 			name:    "closed tuple with viable plain slot still emits",
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"string"}],"items":false}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},

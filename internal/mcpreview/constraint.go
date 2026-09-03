@@ -737,19 +737,32 @@ func nestedAlternativesConstrained(pat string) bool {
 }
 
 // alternativeCanMatchEmpty reports whether a nested regex alternative can
-// match the empty string — an empty branch, an optional group such as
-// (https://)?, or any branch whose every element is optional such as a?.
-// Such a branch lets the overall pattern match at the start of every string,
-// so the pattern constrains nothing even when a sibling branch pins a URL
-// marker. (Branches with unbounded skips such as .* are already rejected by
-// the skip check.)
+// match the empty string at the position where it is attempted — an empty
+// branch, an optional group such as (https://)?, or any branch whose every
+// element is optional such as a?. Such a branch lets the overall pattern
+// match at the start of every string, so the pattern constrains nothing even
+// when a sibling branch pins a URL marker. (Branches with unbounded skips
+// such as .* are already rejected by the skip check.)
 func alternativeCanMatchEmpty(alt string) bool {
+	return matchEmpty(alt, true)
+}
+
+// alternativeCanMatchEmptyEverywhere reports whether alt can match empty at
+// every string position, making the whole pattern match every string under
+// substring semantics. Unlike the at-position check, zero-width assertions
+// that depend on their context (lookarounds) do not qualify: ^(?=https://)
+// still requires its prefix, so it stays constraining.
+func alternativeCanMatchEmptyEverywhere(alt string) bool {
+	return matchEmpty(alt, false)
+}
+
+func matchEmpty(alt string, lookaroundNullable bool) bool {
 	s := strings.TrimSpace(alt)
 	if s == "" {
 		return true
 	}
 	for len(s) > 0 {
-		nullable, rest, ok := consumeNullableAtom(s)
+		nullable, rest, ok := consumeNullableAtom(s, lookaroundNullable)
 		if !ok || !nullable {
 			return false
 		}
@@ -762,7 +775,7 @@ func alternativeCanMatchEmpty(alt string) bool {
 // quantifier) and reports whether that atom can match empty. Malformed input
 // is reported nullable so review stays on the emitting side. The caller must
 // always make progress: every path either consumes input or returns ok=false.
-func consumeNullableAtom(s string) (nullable bool, rest string, ok bool) {
+func consumeNullableAtom(s string, lookaroundNullable bool) (nullable bool, rest string, ok bool) {
 	if s == "" {
 		return false, "", false
 	}
@@ -791,12 +804,13 @@ func consumeNullableAtom(s string) (nullable bool, rest string, ok bool) {
 		inner := s[1:end]
 		s = s[end+1:]
 		if isRegexLookaround(inner) {
-			// Lookahead/lookbehind assertions are zero-width.
-			atomNullable = true
+			// Lookahead/lookbehind assertions are zero-width at their
+			// position; only the at-position check counts them as empty.
+			atomNullable = lookaroundNullable
 		} else {
 			branchEmpty := false
 			for _, branch := range splitTopLevelAlternatives(inner) {
-				if alternativeCanMatchEmpty(branch) {
+				if matchEmpty(branch, lookaroundNullable) {
 					branchEmpty = true
 					break
 				}
@@ -984,13 +998,10 @@ func anchoredMarkerConstrainsURL(alt string) bool {
 	if !strings.HasPrefix(rest, "^") {
 		return false
 	}
-	marker := strings.Index(rest, "http")
-	if i := strings.Index(rest, "://"); i >= 0 && (marker < 0 || i < marker) {
-		marker = i
-	}
-	if i := strings.Index(rest, "scheme"); i >= 0 && (marker < 0 || i < marker) {
-		marker = i
-	}
+	// Only markers consumed positively count: a marker inside a negative
+	// lookahead or lookbehind (as in ^(?!https://)) asserts the marker's
+	// absence, accepting every non-matching URL while rejecting the pinned one.
+	marker := firstPositiveMarker(rest)
 	if marker < 0 {
 		return false
 	}
@@ -1000,6 +1011,48 @@ func anchoredMarkerConstrainsURL(alt string) bool {
 		return false
 	}
 	return !hasUnboundedSkip(rest[1:marker])
+}
+
+// firstPositiveMarker returns the index of the earliest URL marker (http,
+// ://, scheme) that is not enclosed in a negative lookahead or lookbehind,
+// or -1 when every marker is negated or absent.
+func firstPositiveMarker(s string) int {
+	low := strings.ToLower(s)
+	best := -1
+	for _, m := range []string{"http", "://", "scheme"} {
+		for idx := strings.Index(low, m); idx >= 0; idx = nextMarkerIndex(low, m, idx) {
+			if !markerInNegativeAssertion(s, idx) {
+				if best < 0 || idx < best {
+					best = idx
+				}
+				break
+			}
+		}
+	}
+	return best
+}
+
+// nextMarkerIndex returns the next occurrence of m after prev, or -1.
+func nextMarkerIndex(s, m string, prev int) int {
+	if next := strings.Index(s[prev+1:], m); next >= 0 {
+		return prev + 1 + next
+	}
+	return -1
+}
+
+// markerInNegativeAssertion reports whether position idx sits inside a
+// (?!...) or (?<!...) group, where its text is asserted absent rather than
+// matched.
+func markerInNegativeAssertion(s string, idx int) bool {
+	for _, span := range groupSpans(s) {
+		if span.open < idx && idx < span.close {
+			inner := s[span.open+1:]
+			if strings.HasPrefix(inner, "?!") || strings.HasPrefix(inner, "?<!") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // markerInOptionalGroup reports whether position idx sits inside a group
@@ -1145,6 +1198,11 @@ func isVacuousPattern(pat string) bool {
 		`[\w\W]*$`, `[\w\W]+$`, `^[\w\W]*$`, `^[\w\W]+$`:
 		return true
 	default:
-		return false
+		// A pattern that can match empty matches everywhere under JSON
+		// Schema's substring semantics, so it restricts nothing — whether
+		// spelled as a wildcard or as nullable atoms such as a* or (foo)?.
+		// (Zero-width assertions that depend on context, like lookaheads,
+		// do not qualify on their own.)
+		return alternativeCanMatchEmptyEverywhere(s)
 	}
 }
