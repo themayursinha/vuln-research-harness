@@ -4,13 +4,11 @@
 
 A deterministic campaign harness for AI-assisted vulnerability research on
 authorized, locally reproducible targets: campaign contract, approach
-registry, evidence ledger. It encodes the multi-agent search discipline from
-the OpenAI CDC prompt (as adapted for security research by Searchlight
-Cyber's wp2shell work) as data and state transitions.
+registry, evidence ledger. It encodes multi-agent search discipline as data
+and state transitions.
 
-This repo is separate from mcp-visor by design. Visor is the enforcement
-proxy; VRH is a research client that could sit behind an enforcement boundary
-later. Do not merge concerns.
+This repo is a research client, not an enforcement proxy. Do not merge those
+concerns.
 
 ## Hard rules (need Mayur)
 
@@ -23,12 +21,6 @@ later. Do not merge concerns.
 - Do not weaken safety checks in `internal/contract` to make campaigns pass.
 - Do not add dependencies without Mayur.
 
-## Model routing
-
-Follow the standard loop: GPT-5.6-sol architect, Grok 4.6 High builder,
-DeepSeek V4 Pro reviewer (see the `three-model-harness-loop` skill). This is
-a small repo; keep design contracts short and skip the loop only for typos.
-
 ## Verify
 
 ```bash
@@ -40,5 +32,4 @@ make check   # vet + test + build
 
 - Boring Go, stdlib first. Only dependency so far: gopkg.in/yaml.v3.
 - Tests next to code, table-driven where it helps.
-- The evidence ledger is append-only JSONL, hash-linked, modeled on the
-  mcp-visor audit log but independent of it.
+- The evidence ledger is append-only JSONL and hash-linked.

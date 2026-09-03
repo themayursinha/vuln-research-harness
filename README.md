@@ -3,12 +3,11 @@
 A deterministic campaign harness for AI-assisted vulnerability research on
 **authorized, locally reproducible targets**.
 
-VRH turns the multi-agent research pattern demonstrated by OpenAI's Cycle
-Double Cover prompt (adapted to security research by Searchlight Cyber's
-wp2shell work) into a stateful, auditable system: a campaign contract that
-pins the target and success condition, an approach registry that prevents
-premature agent convergence, and an evidence ledger that records every state
-transition from hypothesis to reproduced impact.
+VRH turns multi-agent vulnerability research into a stateful, auditable
+system: a campaign contract that pins the target and success condition, an
+approach registry that prevents premature agent convergence, and an evidence
+ledger that records every state transition from hypothesis to reproduced
+impact.
 
 **Status: Phase 4 pilot prep.** Phases 1–3 are complete: contract, registry,
 ledger, coordinator round loop, container-backed reproduction (`vrh repro`),
