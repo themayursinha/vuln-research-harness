@@ -657,6 +657,31 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 			input:  toolsJSON(`{"name":"alpha","inputSchema":{"not":{"properties":{"url":{"type":"string"}}}}}`),
 			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.not.properties.url"}},
 		},
+		{
+			name:    "required-only url name is still an argument",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"required":["url"]}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "required name already in properties is not duplicated",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"required":["url"],"properties":{"url":{"type":"string","enum":["https://example.invalid"]}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:    "dependentSchemas nested url is visited",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"dependentSchemas":{"mode":{"properties":{"url":{"type":"string"}}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.dependentSchemas.mode.properties.url"}},
+		},
+		{
+			name:   "array enum covers item format cues",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"enum":[["https://safe.invalid"]],"items":{"format":"uri"}}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}, {CategoryUnconstrainedURL, "inputSchema.properties.urls.items"}},
+		},
+		{
+			name:    "unconstrained array item format still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","items":{"format":"uri"}}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},
+		},
 
 		{
 			name:    "negative lookahead marker still emits",

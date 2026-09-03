@@ -181,9 +181,10 @@ func (w *schemaWalker) followRef(obj map[string]any, f walkFrame, callVisit bool
 func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectBranches bool) {
 	loc := f.loc
 	depth := f.depth
-	if props, ok := asObject(obj["properties"]); ok {
-		for _, name := range sortedKeys(props) {
-			child, ok := asSchema(props[name])
+	declared, _ := asObject(obj["properties"])
+	if declared != nil {
+		for _, name := range sortedKeys(declared) {
+			child, ok := asSchema(declared[name])
 			if !ok {
 				continue
 			}
@@ -194,6 +195,14 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 				depth:    depth + 1,
 			}, true)
 		}
+	}
+	for _, name := range requiredOnlyNames(obj, declared) {
+		w.enter(walkFrame{
+			node:     schemaNode{kind: schemaObject, obj: map[string]any{}},
+			loc:      loc + ".properties." + name,
+			propName: name,
+			depth:    depth + 1,
+		}, true)
 	}
 	if patterns, ok := asObject(obj["patternProperties"]); ok {
 		for _, pattern := range sortedKeys(patterns) {
@@ -217,13 +226,15 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 			depth:    depth + 1,
 		}, true)
 	}
+	parent := f.constraint()
 	switch items := obj["items"].(type) {
 	case []any:
-		w.walkSchemaList(items, loc+".items", "items", depth)
+		w.walkSchemaList(items, loc+".items", "items", depth, parent)
 	default:
 		if child, ok := asSchema(items); ok {
 			w.enter(walkFrame{
 				node:     child,
+				origin:   parent,
 				loc:      loc + ".items",
 				propName: "items",
 				depth:    depth + 1,
@@ -231,7 +242,7 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 		}
 	}
 	if prefix, ok := obj["prefixItems"].([]any); ok {
-		w.walkSchemaList(prefix, loc+".prefixItems", "items", depth)
+		w.walkSchemaList(prefix, loc+".prefixItems", "items", depth, parent)
 	}
 	if _, ok := obj["items"].([]any); ok {
 		// additionalItems only constrains elements for the legacy tuple
@@ -239,6 +250,7 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 		if child, ok := asSchema(obj["additionalItems"]); ok {
 			w.enter(walkFrame{
 				node:     child,
+				origin:   parent,
 				loc:      loc + ".additionalItems",
 				propName: "items",
 				depth:    depth + 1,
@@ -272,6 +284,20 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 			}, false)
 		}
 	}
+	if deps, ok := asObject(obj["dependentSchemas"]); ok {
+		for _, name := range sortedKeys(deps) {
+			child, ok := asSchema(deps[name])
+			if !ok {
+				continue
+			}
+			w.enter(walkFrame{
+				node:     child,
+				loc:      loc + ".dependentSchemas." + name,
+				propName: "",
+				depth:    depth + 1,
+			}, false)
+		}
+	}
 	// then/else/if describe conditionally accepted instances, but not
 	// describes rejected ones, so its properties are never arguments.
 	for _, key := range []string{"then", "else", "if"} {
@@ -288,7 +314,7 @@ func (w *schemaWalker) walkApplicators(obj map[string]any, f walkFrame, inspectB
 	}
 }
 
-func (w *schemaWalker) walkSchemaList(items []any, loc, propName string, depth int) {
+func (w *schemaWalker) walkSchemaList(items []any, loc, propName string, depth int, origin schemaNode) {
 	for i, item := range items {
 		child, ok := asSchema(item)
 		if !ok {
@@ -296,11 +322,41 @@ func (w *schemaWalker) walkSchemaList(items []any, loc, propName string, depth i
 		}
 		w.enter(walkFrame{
 			node:     child,
+			origin:   origin,
 			loc:      fmt.Sprintf("%s[%d]", loc, i),
 			propName: propName,
 			depth:    depth + 1,
 		}, true)
 	}
+}
+
+// requiredOnlyNames returns required property names that have no properties
+// entry, so they are still accepted arguments without a declared schema.
+func requiredOnlyNames(obj, declared map[string]any) []string {
+	arr, ok := obj["required"].([]any)
+	if !ok {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var names []string
+	for _, item := range arr {
+		name, ok := item.(string)
+		if !ok || name == "" {
+			continue
+		}
+		if declared != nil {
+			if _, exists := declared[name]; exists {
+				continue
+			}
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func resolveLocalRef(root map[string]any, ref string) (schemaNode, bool) {
