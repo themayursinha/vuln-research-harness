@@ -701,6 +701,27 @@ func TestReviewCompositionAndLocalRefs(t *testing.T) {
 		},
 
 		{
+			name:    "unwrapped match-all branch still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"path":{"type":"string","pattern":"^(safe|[\\s\\S]*)$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedPath, pathLoc}},
+		},
+		{
+			name:   "unwrapped clean branches stay constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"cmd":{"type":"string","pattern":"^(status|health)$"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedCommand, cmdLoc}},
+		},
+		{
+			name:    "brace-optional marker group still emits",
+			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://){0,1}.*$"}}}}`),
+			present: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+		{
+			name:   "brace-required marker group stays constrained",
+			input:  toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"url":{"type":"string","pattern":"^(https://){1,2}.*$"}}}}`),
+			absent: []locCat{{CategoryUnconstrainedURL, urlLoc}},
+		},
+
+		{
 			name:    "closed tuple with viable plain slot still emits",
 			input:   toolsJSON(`{"name":"alpha","inputSchema":{"properties":{"urls":{"type":"array","prefixItems":[{"type":"string"}],"items":false}}}}`),
 			present: []locCat{{CategoryUnconstrainedURL, "inputSchema.properties.urls"}},

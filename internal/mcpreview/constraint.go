@@ -1056,12 +1056,19 @@ func markerInNegativeAssertion(s string, idx int) bool {
 }
 
 // markerInOptionalGroup reports whether position idx sits inside a group
-// whose match is optional via a trailing ? or * quantifier.
+// whose match is optional: a trailing ?, *, or zero-minimum brace quantifier
+// ({0}, {0,n}, {0,}).
 func markerInOptionalGroup(s string, idx int) bool {
 	for _, span := range groupSpans(s) {
 		if span.open < idx && idx < span.close {
-			if span.close+1 < len(s) && (s[span.close+1] == '?' || s[span.close+1] == '*') {
+			next := span.close + 1
+			if next < len(s) && (s[next] == '?' || s[next] == '*') {
 				return true
+			}
+			if next < len(s) && s[next] == '{' {
+				if nullable, _, valid := braceQuantifierNullability(s[next:], false); valid && nullable {
+					return true
+				}
 			}
 		}
 	}
@@ -1236,6 +1243,15 @@ func stripAnchors(s string) (string, bool) {
 func fullyAnchoredMatchAll(rem string) bool {
 	s := rem
 	for {
+		// One match-all branch is enough, as in ^(safe|[\s\S]*)$.
+		if alts := splitTopLevelAlternatives(s); len(alts) > 1 {
+			for _, alt := range alts {
+				if fullyAnchoredMatchAll(alt) {
+					return true
+				}
+			}
+			return false
+		}
 		switch s {
 		case `.*`, `.+`, `[\s\S]*`, `[\s\S]+`, `[\w\W]*`, `[\w\W]+`,
 			`(?s).*`, `(?s).+`, `[^]*`, `[^]+`:
