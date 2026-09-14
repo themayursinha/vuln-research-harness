@@ -1,8 +1,10 @@
 repro_outcomes.json
 validation_*.json
-# Round-1 family probe outcomes are structured summaries (no raw output);
-# they are committed evidence for the four-worker pilot.
+# Structured outcome summaries are committed evidence for the four-worker
+# pilot: the four family probe outcomes under evidence/ and the
+# success-condition baseline at the campaign root.
 !evidence/*/repro_outcomes.json
+!/repro_outcomes.json
 ledger.jsonl
 state.json
 registry.json

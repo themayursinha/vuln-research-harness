@@ -78,6 +78,9 @@ const secretPaths = [
   path.join(root, "sandbox.evil", "secret.txt"),
 ];
 // Boundary cases that must stay allowed (they ARE the root or inside it).
+// A rejection here means the probe is misconfigured, not that the mechanism
+// is refuted — fail closed with a nonzero exit so the run cannot be recorded
+// as a valid non-reproduction.
 const boundaryPaths = [sandbox, path.join(sandbox, "public.txt")];
 
 let escaped = false;
@@ -109,6 +112,9 @@ for (const requested of boundaryPaths) {
     outcome = `resolved=${resolved} (inside, expected)`;
   } catch (err) {
     outcome = `rejected unexpectedly: ${String(err.message).split("\n")[0]}`;
+    console.log(JSON.stringify({ requested, outcome }));
+    console.error("prefix: positive control rejected; probe invalid, refusing to record a non-reproduction");
+    process.exit(3);
   }
   console.log(JSON.stringify({ requested, outcome }));
 }

@@ -1,6 +1,6 @@
 # Round 1 measurement — bounded four-worker pilot on mcp-filesystem
 
-Executed 2026-09-14 on stellaris against
+Executed 2026-09-14 on a private Linux execution host against
 `localhost/vrh-mcp-filesystem@sha256:5033003e549ab2dd170607f70856730ade6d5405a733a32c397e91dd57ec14db`
 (digest-pinned, network=none, read-only snapshot, caps dropped, no pull).
 Executor: manual inbox executor v1 — the four worker lanes were executed by
@@ -18,14 +18,47 @@ gate) was probed four ways and did not reproduce.
 | family  | mechanism                                   | status   | probe duration | output digest (sha256) |
 |---------|---------------------------------------------|----------|----------------|------------------------|
 | dotdot  | parent-directory segments through validatePath | refuted | 1029 ms | `c3094750…febd8` |
-| prefix  | allowed-directory string-prefix matching      | refuted |  956 ms | `44c5ec08…da35c` |
-| symlink | symlink inside root resolving outside         | refuted |  947 ms | `9e7d33ec…3561`  |
-| unicode | Unicode NFC-equivalent path components        | refuted | 1001 ms | `8f464719…4632`  |
+| prefix  | allowed-directory string-prefix matching      | refuted |  896 ms | `44c5ec08…da35c` |
+| symlink | symlink inside root resolving outside         | refuted |  939 ms | `9e7d33ec…3561`  |
+| unicode | Unicode NFC-equivalent path components        | refuted |  945 ms | `48a96f64…2f2b2` |
 | —       | success-condition probe (root-escape-probe)   | not reproduced | 943 ms | `2dba5dbc…aa35` |
 
 Full digests: `evidence/*/repro_outcomes.json` (per family) and
-`repro_outcomes.json` (baseline). Ledger: 19 events, hash-linked
+`repro_outcomes.json` (baseline). Ledger: 22 events, hash-linked
 (`ledger.jsonl`, local-only per .gitignore policy).
+
+## Post-review corrections (2026-09-14, same day)
+
+An adversarial code review (Codex, GPT 5.6 Sol, high effort) of this patch
+found five defects; all were fixed and the affected lanes re-executed in the
+same locked lane. Corrections are append-only: the ledger carries both the
+original and the corrected runs.
+
+1. **Internal hostname in this note** (P1) — removed; the repo forbids
+   internal hostnames in public artifacts.
+2. **Unicode escape oracle was dead** (P1) — the original escape tree never
+   created the outside secret, so a hypothetical escape could not have
+   emitted the marker; a "did not reproduce" would have been unfalsifiable.
+   Corrected probe creates a readable outside secret.
+3. **Unicode lane never reached the NFC fallback** (P1) — both sub-tests
+   byte-matched an on-disk entry, so `fs.realpath` succeeded directly and
+   `resolveUnicodeEquivalentPath` was never exercised. Corrected probe uses
+   U+01ED (ǭ), which has three byte-distinct canonically-equivalent
+   spellings: the compat case requests a byte-absent decomposed form over a
+   composed-only entry (fallback must resolve it inside the root), the
+   ambiguity case requests the mark-reordered spelling over two on-disk
+   equivalents (guard must fire), and the encoding preconditions are
+   asserted at startup. Outcome unchanged: non-reproduction, new digest
+   `48a96f646b8ba99eaf3ffc977627cc947d4031fb161ba85f54fb33dba3b2f2b2`
+   (original `8f464719…4632` is superseded).
+4. **Campaign-root baseline outcome was ignored by .gitignore** (P2) — the
+   success-condition `repro_outcomes.json` is now whitelisted and committed
+   so the referenced digest is inspectable from a fresh checkout.
+5. **Positive controls did not fail closed** (P2) — prefix and symlink
+   probes now exit nonzero if an in-root positive control is unexpectedly
+   rejected, so a misconfigured probe can never be recorded as a valid
+   non-reproduction. Re-runs of both lanes produced byte-identical output
+   digests to the originals, confirming the originals were healthy runs.
 
 ## Calibration control (Kaiser discipline 4)
 
@@ -77,7 +110,11 @@ probe.
   inside ENOENT paths, starts at the realpath'd allowed root, and re-verifies
   containment per step; `outside` is ASCII with no NFC alias. The dead branch
   at lib.ts:105-107 (returning an uncontained path) is unreachable for
-  attacker input on this pin.
+  attacker input on this pin. Verified with byte-absent equivalent spellings
+  of U+01ED (three canonical encodings): the fallback resolved the decomposed
+  request to the composed entry inside the root, the reordered request raised
+  the ambiguity error, and escape attempts against a readable outside secret
+  stayed inside.
 
 ## Safety
 

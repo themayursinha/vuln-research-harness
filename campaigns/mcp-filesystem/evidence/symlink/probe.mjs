@@ -100,6 +100,15 @@ for (const requested of attempts) {
     }
   } catch (err) {
     outcome = `rejected: ${String(err.message).split("\n")[0]}`;
+    // Positive control: the in-root symlink must keep resolving. Its
+    // rejection means the probe is misconfigured, not that the escape
+    // mechanism is refuted — fail closed with a nonzero exit so the run
+    // cannot be recorded as a valid non-reproduction.
+    if (requested === path.join(sandbox, "link-in")) {
+      console.log(JSON.stringify({ requested, outcome }));
+      console.error("symlink: positive control rejected; probe invalid, refusing to record a non-reproduction");
+      process.exit(3);
+    }
   }
   console.log(JSON.stringify({ requested, outcome }));
 }
