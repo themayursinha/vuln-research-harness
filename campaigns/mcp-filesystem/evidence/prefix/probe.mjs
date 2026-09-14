@@ -83,6 +83,10 @@ for (const dir of [sandbox, path.join(root, "sandboxevil"), path.join(root, "san
 for (const dir of ["sandboxevil", "sandbox.evil"]) {
   fs.writeFileSync(path.join(root, dir, "secret.txt"), "SYNTHETIC-SECRET\n");
 }
+// In-root fixture for the positive control: proves the compiled validator
+// accepts and resolves a real, readable in-root file, not just directories
+// or nonexistent tails.
+fs.writeFileSync(path.join(sandbox, "public.txt"), "SYNTHETIC-INROOT\n");
 setAllowedDirectories([sandbox]);
 
 const secretPaths = [
@@ -121,7 +125,25 @@ for (const requested of boundaryPaths) {
   let outcome;
   try {
     const resolved = await validatePath(requested);
-    outcome = `resolved=${resolved} (inside, expected)`;
+    if (requested === sandbox) {
+      // Equal-path boundary: the allowed root itself must validate; it is
+      // a directory, so there is nothing to read.
+      outcome = `resolved=${resolved} dir (equal-path boundary, expected)`;
+    } else {
+      // The in-root file control must validate AND read with the expected
+      // content; a directory-only or nonexistent-tail pass proves nothing
+      // about real file access. Any failure here means the probe is
+      // misconfigured, not that the mechanism is refuted — fail closed via
+      // the runner's sandbox-fail exit (125) so the run cannot be recorded
+      // as a valid non-reproduction.
+      const text = fs.readFileSync(resolved, "utf8");
+      if (!text.includes("SYNTHETIC-INROOT")) {
+        console.log(JSON.stringify({ requested, outcome: `resolved=${resolved} content-not-expected` }));
+        console.error("prefix: positive control read unexpected content; probe invalid, failing the run (exit 125)");
+        process.exit(125);
+      }
+      outcome = `resolved=${resolved} read ok (expected)`;
+    }
   } catch (err) {
     outcome = `rejected unexpectedly: ${String(err.message).split("\n")[0]}`;
     console.log(JSON.stringify({ requested, outcome }));

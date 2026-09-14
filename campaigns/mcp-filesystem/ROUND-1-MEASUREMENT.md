@@ -18,7 +18,7 @@ gate) was probed four ways and did not reproduce.
 | family  | mechanism                                   | status   | probe duration | output digest (sha256) |
 |---------|---------------------------------------------|----------|----------------|------------------------|
 | dotdot  | parent-directory segments through validatePath | refuted |  976 ms | `e2e29f8e…51680` |
-| prefix  | allowed-directory string-prefix matching      | refuted |  925 ms | `44c5ec08…da35c` |
+| prefix  | allowed-directory string-prefix matching      | refuted |  913 ms | `58d3a7e7…73c4` |
 | symlink | symlink inside root resolving outside         | refuted |  964 ms | `9e7d33ec…3561`  |
 | unicode | Unicode NFC-equivalent path components        | refuted |  935 ms | `ec0da4d9…76de0` |
 | —       | success-condition probe (root-escape-probe)   | not reproduced | 893 ms | `2dba5dbc…aa35` |
@@ -28,7 +28,7 @@ post-review corrections below); output digests were stable across every
 re-execution of each lane.
 
 Full digests: `evidence/*/repro_outcomes.json` (per family) and
-`repro_outcomes.json` (baseline). Ledger: 32 events, hash-linked
+`repro_outcomes.json` (baseline). Ledger: 33 events, hash-linked
 (`ledger.jsonl`, local-only per .gitignore policy; the count includes the
 append-only correction re-executions documented below).
 
@@ -159,6 +159,18 @@ A fifth re-review pass found three more, also fixed:
     registrations (read 193/281/341, write 374, edit 404, create 429,
     list 455/484, directory_tree 571, search 664 + lib.ts:442-483,
     get_file_info 690, list_allowed_directories 715).
+
+A sixth re-review pass found one more, also fixed:
+
+18. **Prefix positive control was hollow** (P2) — the boundary "controls"
+    were a bare directory (validatePath accepts directories regardless)
+    and an in-root file that the probe never created or read, so a
+    validator that resolves nonexistent tails but cannot read real files
+    would still have recorded a refutation. The probe now creates an
+    in-root fixture and requires validation plus a content-matched read
+    (exit 125 otherwise). Outcome unchanged: non-reproduction, new digest
+    `58d3a7e756dd78b97213c4df7a2ad310f27f9ca9982f7896702e3a55607f73c4`
+    (supersedes `44c5ec08…da35c`).
 
 ## Calibration control (Kaiser discipline 4)
 
