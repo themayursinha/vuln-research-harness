@@ -4,7 +4,7 @@
     "finding": "H-MCPFS-ROOT-ESCAPE",
     "vulnerable": false,
     "exit_code": 0,
-    "duration_ms": 893,
+    "duration_ms": 954,
     "output_digest": "2dba5dbc339e7316aea2683faf839c1b7b1ee2313db792112588118df066aa35",
     "error": "marker not observed on stdout; finding did not reproduce"
   }

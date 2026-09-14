@@ -23,7 +23,9 @@ calibration_control:
 
 surfaces:
   # Shared validation gate — every path-taking tool funnels here
-  # (index.ts has 14 validatePath call sites, one per path argument).
+  # (index.ts has 13 validatePath call sites covering the 14 path-argument
+  # fields — move_file validates both endpoints, read_multiple_files uses
+  # one site in a loop; list_allowed_directories takes no path).
   - surface: validatePath lexical containment (isPathWithinAllowedDirectories)
     source: source/path-validation.ts:11-86
     status: refuted

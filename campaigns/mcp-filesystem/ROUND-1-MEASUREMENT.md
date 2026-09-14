@@ -28,7 +28,7 @@ post-review corrections below); output digests were stable across every
 re-execution of each lane.
 
 Full digests: `evidence/*/repro_outcomes.json` (per family) and
-`repro_outcomes.json` (baseline). Ledger: 33 events, hash-linked
+`repro_outcomes.json` (baseline). Ledger: 34 events, hash-linked
 (`ledger.jsonl`, local-only per .gitignore policy; the count includes the
 append-only correction re-executions documented below).
 
@@ -171,6 +171,21 @@ A sixth re-review pass found one more, also fixed:
     (exit 125 otherwise). Outcome unchanged: non-reproduction, new digest
     `58d3a7e756dd78b97213c4df7a2ad310f27f9ca9982f7896702e3a55607f73c4`
     (supersedes `44c5ec08…da35c`).
+
+A seventh re-review pass found two more, also fixed:
+
+19. **Baseline probe lacked a positive control** (P2) — the
+    success-condition probe (`scripts/repro.mjs`) caught the outside-path
+    rejection and exited 0, so a deny-all or broken validator would have
+    produced the committed `vulnerable:false` baseline. The probe now
+    validates and reads the pinned in-root fixture first (exit 125 on
+    failure). Baseline re-executed: outcome unchanged, output digest
+    unchanged (`2dba5dbc…aa35` — the control is silent on success).
+20. **Call-site count inflated** (P2) — coverage.yaml said "14 validatePath
+    call sites"; a grep count had included the import line. Corrected to
+    13 call sites covering the 14 path-argument fields (move_file
+    validates both endpoints, read_multiple_files uses one site in a
+    loop, list_allowed_directories takes no path).
 
 ## Calibration control (Kaiser discipline 4)
 

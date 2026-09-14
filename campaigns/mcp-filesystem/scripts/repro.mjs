@@ -75,6 +75,23 @@ const { setAllowedDirectories, validatePath } = await import(
 const sandbox = path.resolve(snapshot, "sandbox");
 setAllowedDirectories([sandbox]);
 
+// Positive control: an in-root fixture file must validate and read. Without
+// it, a deny-all or otherwise broken validator would also exit quietly on
+// the escape attempt below and be recorded as a valid baseline
+// non-reproduction. Fail closed via the runner's sandbox-fail exit (125):
+// vrh repro fails loudly, exports nothing, and appends no ledger event.
+try {
+  const control = await validatePath("public.txt");
+  const controlText = fs.readFileSync(control, "utf8");
+  if (!controlText.includes("public sandbox file")) {
+    console.error("baseline: positive control read unexpected content; probe invalid (exit 125)");
+    process.exit(125);
+  }
+} catch (err) {
+  console.error("baseline: positive control failed; probe invalid (exit 125):", String(err?.message || err).split("\n")[0]);
+  process.exit(125);
+}
+
 let resolved;
 try {
   resolved = await validatePath("../outside/secret.txt");
