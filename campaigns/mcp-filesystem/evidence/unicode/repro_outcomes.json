@@ -1,0 +1,11 @@
+[
+  {
+    "case_id": "probe-unicode",
+    "finding": "H-MCPFS-UNICODE",
+    "vulnerable": false,
+    "exit_code": 0,
+    "duration_ms": 935,
+    "output_digest": "ec0da4d89dc6f4276da8f64ccae899588de782cd0d75aeea5bcaa4eefd876de0",
+    "error": "marker not observed on stdout; finding did not reproduce"
+  }
+]

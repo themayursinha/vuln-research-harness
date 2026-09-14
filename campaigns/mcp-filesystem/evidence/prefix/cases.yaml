@@ -1,0 +1,6 @@
+- id: probe-prefix
+  finding: H-MCPFS-PREFIX
+  script_path: probe.mjs
+  interpreter: node
+  marker: MCPFS-ROOT-ESCAPE
+  timeout_seconds: 60

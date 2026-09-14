@@ -29,11 +29,15 @@
 - [x] Reference fixture campaign (`campaigns/fixture-lab`)
 - [x] Choose one authorized open-source MCP server with a local fixture
       (`campaigns/mcp-filesystem`: official filesystem server)
-- [ ] Seed and dispatch a bounded four-worker campaign
+- [x] Seed and dispatch a bounded four-worker campaign
       (`vrh families seed` + `vrh round plan . 4`; workers still write
       result envelopes through the inbox — no fabricated evidence)
-- [ ] Measure approach diversity, false positives, evidence completeness,
+      Round 1 (2026-09-14): 4/4 lanes dispatched, executed and ingested;
+      all four mechanisms refuted, zero findings, calibration control passed.
+- [x] Measure approach diversity, false positives, evidence completeness,
       runtime, and model cost
+      (`campaigns/mcp-filesystem/ROUND-1-MEASUREMENT.md`; model cost is
+      qualitative until a metered agent runner exists)
 - [ ] Publish a methodology note only after the workflow is reproducible
 
 The first pilot must not target live infrastructure and must not become a

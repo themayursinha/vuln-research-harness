@@ -1,0 +1,11 @@
+[
+  {
+    "case_id": "probe-prefix",
+    "finding": "H-MCPFS-PREFIX",
+    "vulnerable": false,
+    "exit_code": 0,
+    "duration_ms": 913,
+    "output_digest": "58d3a7e756dd78b97213c4df7a2ad310f27f9ca9982f7896702e3a55607f73c4",
+    "error": "marker not observed on stdout; finding did not reproduce"
+  }
+]

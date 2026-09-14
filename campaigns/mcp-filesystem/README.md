@@ -61,6 +61,18 @@ per family. Workers (human or isolated agent) write result envelopes into
 `tools.json` is a sanitized copy of this pin's tool schemas for
 `vrh review-mcp-schema`. Hypotheses are triage, not findings.
 
+## Round 1 outcome (2026-09-14)
+
+All four families were dispatched, executed in the locked lane, and ingested
+(4/4 structured results, ledger-hash-linked). Every mechanism was refuted and
+the success-condition probe did not reproduce: confinement held on this pin,
+zero findings. Calibration control: the fixture-lab planted path-join bug
+(F-LAB-001) reproduced in the same lane, proving the detection pipeline
+works. Surface-by-surface status lives in `coverage.yaml`; the measured
+diversity / false-positive / evidence / runtime / cost numbers live in
+`ROUND-1-MEASUREMENT.md`. Family lanes stay active for materially new
+mechanisms only (anti-whack-a-mole rule).
+
 ## License
 
 Upstream sources and `source/LICENSE` remain under the MCP project's
