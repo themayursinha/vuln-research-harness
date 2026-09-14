@@ -63,9 +63,9 @@ surfaces:
   # Tool-level surfaces — share the gate above but carry their own post-
   # validation logic that round 1 did not individually exercise.
   - surface: read_file / read_text_file / read_media_file / read_multiple_files
-    source: source/index.ts:193,281,341,374
+    source: source/index.ts:193,281,341
     status: covered-gate
-    note: gated solely by validatePath; per-file loop validated (index.ts:341)
+    note: gated solely by validatePath; per-file loop validated (index.ts:341); handler wiring beyond the gate not individually exercised
   - surface: write_file exclusive-create + atomic rename
     source: source/lib.ts:205-237
     status: pending
@@ -78,18 +78,36 @@ surfaces:
   - surface: move_file destination lstat guard (no-overwrite contract)
     source: source/lib.ts:240-256
     status: pending
-  - surface: list_directory / list_directory_with_sizes / directory_tree
-    source: source/index.ts:429,455,484
+  - surface: list_directory
+    source: source/index.ts:455
     status: covered-gate
-    note: gated solely by validatePath
+    note: gated solely by validatePath; handler wiring beyond the gate not individually exercised
+  - surface: list_directory_with_sizes post-gate stat
+    source: source/index.ts:484,492
+    status: pending
+    note: >
+      validates the parent directory only; fs.stat(entryPath) at
+      index.ts:492 follows a pre-existing inside-root symlink without
+      re-validation and would expose outside-target metadata — the same
+      precondition the symlink lane plants. Handler never exercised in
+      round 1. Recorded as a round-2 candidate lead, not a finding
+      (crash-first rule: no executed probe observed the behavior).
+  - surface: directory_tree
+    source: source/index.ts:571
+    status: covered-gate
+    note: gated solely by validatePath; handler wiring beyond the gate not individually exercised
   - surface: search_files recursive re-validation per entry
     source: source/lib.ts:442-483
     status: covered-gate
-    note: per-entry validatePath (index.ts:571); recursion rooted at a validated path
-  - surface: get_file_info / list_allowed_directories
-    source: source/index.ts:664,690
+    note: per-entry validatePath (lib.ts:458); dispatch at index.ts:664; handler wiring beyond the gate not individually exercised
+  - surface: get_file_info
+    source: source/index.ts:690
     status: covered-gate
-    note: read-only; gated by validatePath / no path argument
+    note: read-only; gated by validatePath
+  - surface: list_allowed_directories
+    source: source/index.ts:715
+    status: pending
+    note: no path argument (no gate to exercise); handler not individually exercised in round 1
 
 findings:
   confirmed: 0
@@ -102,7 +120,11 @@ findings:
     All four mechanisms are explicitly refuted with evidence, not left open.
 
 round_2_candidates:
+  - list_directory_with_sizes post-gate fs.stat follows inside-root symlinks
+    without re-validation (index.ts:492): probe whether outside-target
+    metadata is exposed and whether that meets the campaign impact bar
   - individually exercise write_file/edit_file/move_file/create_directory
     post-validation logic (TOCTOU, rename semantics) in a dedicated lane
   - roots-utils.ts integration surface (allowed roots supplied by client)
+  - pre-gate surfaces: expandHome tilde handling, Windows drive-path rejection
   - re-run lanes only with a materially new mechanism (anti-whack-a-mole rule)

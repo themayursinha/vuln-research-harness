@@ -104,6 +104,16 @@ for (const requested of attempts) {
       outcome = `resolved=${resolved} READ`;
     } catch (readErr) {
       outcome = `resolved=${resolved} read_failed=${readErr.code}`;
+      // Positive control: the in-root symlink must keep resolving AND its
+      // target must be readable. A read failure here means the probe is
+      // misconfigured, not that the escape mechanism is refuted — fail
+      // closed via the runner's sandbox-fail exit (125) so the run cannot
+      // be recorded as a valid non-reproduction.
+      if (requested === path.join(sandbox, "link-in")) {
+        console.log(JSON.stringify({ requested, outcome }));
+        console.error("symlink: positive control read failed; probe invalid, failing the run (exit 125)");
+        process.exit(125);
+      }
     }
     if (text.includes("SYNTHETIC-SECRET")) {
       outcome = `resolved=${resolved} SECRET READ`;

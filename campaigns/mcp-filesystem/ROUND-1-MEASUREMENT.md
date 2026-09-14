@@ -19,7 +19,7 @@ gate) was probed four ways and did not reproduce.
 |---------|---------------------------------------------|----------|----------------|------------------------|
 | dotdot  | parent-directory segments through validatePath | refuted |  976 ms | `e2e29f8e…51680` |
 | prefix  | allowed-directory string-prefix matching      | refuted |  925 ms | `44c5ec08…da35c` |
-| symlink | symlink inside root resolving outside         | refuted |  885 ms | `9e7d33ec…3561`  |
+| symlink | symlink inside root resolving outside         | refuted |  964 ms | `9e7d33ec…3561`  |
 | unicode | Unicode NFC-equivalent path components        | refuted |  935 ms | `ec0da4d9…76de0` |
 | —       | success-condition probe (root-escape-probe)   | not reproduced | 893 ms | `2dba5dbc…aa35` |
 
@@ -28,7 +28,7 @@ post-review corrections below); output digests were stable across every
 re-execution of each lane.
 
 Full digests: `evidence/*/repro_outcomes.json` (per family) and
-`repro_outcomes.json` (baseline). Ledger: 31 events, hash-linked
+`repro_outcomes.json` (baseline). Ledger: 32 events, hash-linked
 (`ledger.jsonl`, local-only per .gitignore policy; the count includes the
 append-only correction re-executions documented below).
 
@@ -140,6 +140,25 @@ A fourth re-review pass (same reviewer) found three more, also fixed:
     fails. Outcome unchanged: non-reproduction, new digest
     `e2e29f8ef720beabe7b12b1b0a5d04fbf6934f9c5784e94dcb8f9f627fa51680`
     (supersedes `c3094750…febd8`).
+
+A fifth re-review pass found three more, also fixed:
+
+15. **Symlink positive control could half-fail** (P2) — the in-root
+    control symlink could validate but fail its read, which was recorded
+    as a documented outcome instead of failing the probe; a read failure
+    on the control now exits 125. Outcome unchanged: non-reproduction,
+    digest unchanged (`9e7d33ec…3561`).
+16. **Coverage overstated an untested post-gate surface** (P2) —
+    `list_directory_with_sizes` validates only the parent directory and
+    its `fs.stat(entryPath)` (index.ts:492) follows a pre-existing
+    inside-root symlink without re-validation; the handler was never
+    exercised. It is now a `pending` surface and a round-2 candidate lead
+    (not a finding — no executed probe observed the behavior).
+17. **Shifted source references in coverage.yaml** (P2) — several
+    handler mappings pointed at the wrong tools; corrected to the actual
+    registrations (read 193/281/341, write 374, edit 404, create 429,
+    list 455/484, directory_tree 571, search 664 + lib.ts:442-483,
+    get_file_info 690, list_allowed_directories 715).
 
 ## Calibration control (Kaiser discipline 4)
 
