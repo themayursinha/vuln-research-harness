@@ -1,0 +1,100 @@
+# Coverage-by-surface artifact for the mcp-filesystem Phase 4 pilot.
+#
+# Discipline (Quentin Kaiser, "AI Assisted Vulnerability Research on Embedded
+# Targets", 2026-07-18): enumerate surfaces, work them in order, end each with
+# an explicit status so untouched parsers stay visible. Statuses:
+#   covered-gate    surface exercised in round 1 through its governing gate
+#   pending         surfaced but not individually exercised yet (round 2+)
+#   refuted         mechanism probed against this pin and rejected, with evidence
+# A surface only becomes a finding through the crash-first rule: reproduced
+# execution of the claimed impact (marker on stdout in the locked lane).
+# Pilot-level artifact pending the harness-level design decision (board
+# t_94188474); this file does not change harness code.
+
+campaign: mcp-filesystem
+pin: modelcontextprotocol/servers src/filesystem @ d73f99efbfd40c3aa1b61e88728b3d49fb52608f
+round: 1
+date: 2026-09-14
+success_condition: read outside/secret.txt via a tool path argument while the allowed root is sandbox/
+calibration_control:
+  target: campaigns/fixture-lab (known planted path-join bug F-LAB-001)
+  result: REPRODUCED (marker LAB-VULN-MARKER, output digest 0945b1cfb8c63508fe6d1f34e6ffb2317125eacd6b7f26ee1389d5a9e78586ec)
+  meaning: detection pipeline (pinned snapshot -> locked probe -> marker) demonstrably catches a real bug
+
+surfaces:
+  # Shared validation gate — every path-taking tool funnels here
+  # (index.ts has 14 validatePath call sites, one per path argument).
+  - surface: validatePath lexical containment (isPathWithinAllowedDirectories)
+    source: source/path-validation.ts:11-86
+    status: refuted
+    lanes: [dotdot, prefix]
+    evidence: evidence/dotdot/, evidence/prefix/
+  - surface: validatePath relative resolution against allowed roots
+    source: source/lib.ts:77-97
+    status: refuted
+    lanes: [dotdot]
+    evidence: evidence/dotdot/
+  - surface: validatePath symlink realpath containment
+    source: source/lib.ts:160-168
+    status: refuted
+    lanes: [symlink]
+    evidence: evidence/symlink/
+  - surface: validatePath Unicode NFC-equivalent resolution
+    source: source/lib.ts:100-138
+    status: refuted
+    lanes: [unicode]
+    evidence: evidence/unicode/
+  - surface: expandHome tilde expansion
+    source: source/lib.ts:119-124
+    status: covered-gate
+    note: no ~-escape on this pin (homedir outside root rejected by lexical gate); not a separate lane
+  - surface: Windows drive-path rejection on POSIX hosts
+    source: source/lib.ts:145-147
+    status: covered-gate
+    note: campaign contract is a linux container; win32 branches (path-validation.ts:72-82) out of scope
+  # Tool-level surfaces — share the gate above but carry their own post-
+  # validation logic that round 1 did not individually exercise.
+  - surface: read_file / read_text_file / read_media_file / read_multiple_files
+    source: source/index.ts:193,281,341,374
+    status: covered-gate
+    note: gated solely by validatePath; per-file loop validated (index.ts:341)
+  - surface: write_file exclusive-create + atomic rename
+    source: source/lib.ts:205-237
+    status: pending
+  - surface: edit_file sequential edits + atomic rename
+    source: source/lib.ts:265-361
+    status: pending
+  - surface: create_directory (ENOENT tail append path)
+    source: source/lib.ts:124-129
+    status: pending
+  - surface: move_file destination lstat guard (no-overwrite contract)
+    source: source/lib.ts:240-256
+    status: pending
+  - surface: list_directory / list_directory_with_sizes / directory_tree
+    source: source/index.ts:429,455,484
+    status: covered-gate
+    note: gated solely by validatePath
+  - surface: search_files recursive re-validation per entry
+    source: source/lib.ts:442-483
+    status: covered-gate
+    note: per-entry validatePath (index.ts:571); recursion rooted at a validated path
+  - surface: get_file_info / list_allowed_directories
+    source: source/index.ts:664,690
+    status: covered-gate
+    note: read-only; gated by validatePath / no path argument
+
+findings:
+  confirmed: 0
+  suspected: 0
+  note: >
+    Per the crash-first rule no finding exists on this pin: the success-
+    condition probe (root-escape-probe) and all four family probes exited
+    quietly in the locked lane, so there is nothing to carry into the
+    per-finding directory contract (README + reduced test case + exploit).
+    All four mechanisms are explicitly refuted with evidence, not left open.
+
+round_2_candidates:
+  - individually exercise write_file/edit_file/move_file/create_directory
+    post-validation logic (TOCTOU, rename semantics) in a dedicated lane
+  - roots-utils.ts integration surface (allowed roots supplied by client)
+  - re-run lanes only with a materially new mechanism (anti-whack-a-mole rule)
