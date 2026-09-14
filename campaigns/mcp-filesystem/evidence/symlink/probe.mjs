@@ -102,12 +102,15 @@ for (const requested of attempts) {
     outcome = `rejected: ${String(err.message).split("\n")[0]}`;
     // Positive control: the in-root symlink must keep resolving. Its
     // rejection means the probe is misconfigured, not that the escape
-    // mechanism is refuted — fail closed with a nonzero exit so the run
-    // cannot be recorded as a valid non-reproduction.
+    // mechanism is refuted — fail closed via the runner's sandbox-fail
+    // exit (125) so the run cannot be recorded as a valid non-reproduction.
     if (requested === path.join(sandbox, "link-in")) {
       console.log(JSON.stringify({ requested, outcome }));
-      console.error("symlink: positive control rejected; probe invalid, refusing to record a non-reproduction");
-      process.exit(3);
+      // Exit 125 = the repro runner's sandbox-fail channel: the run fails
+      // loudly with no export and no ledger event, instead of being
+      // recorded as a valid non-reproduction.
+      console.error("symlink: positive control rejected; probe invalid, failing the run (exit 125)");
+      process.exit(125);
     }
   }
   console.log(JSON.stringify({ requested, outcome }));

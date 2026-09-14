@@ -4,7 +4,7 @@
     "finding": "H-MCPFS-SYMLINK",
     "vulnerable": false,
     "exit_code": 0,
-    "duration_ms": 939,
+    "duration_ms": 922,
     "output_digest": "9e7d33ecdc7804ccd0c5bcf46be2d7c30ac4388888a7bd23357c6c8b07263561",
     "error": "marker not observed on stdout; finding did not reproduce"
   }

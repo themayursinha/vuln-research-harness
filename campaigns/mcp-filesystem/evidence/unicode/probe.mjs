@@ -60,8 +60,8 @@ const decompReordered = "o\u0304\u0328.txt";
     nfc(composed) === nfc(decompOrdered) && nfc(composed) === nfc(decompReordered);
   const distinct = new Set([composed, decompOrdered, decompReordered]).size === 3;
   if (!sameForm || !distinct) {
-    console.error("unicode: Unicode encoding preconditions failed on this runtime; probe invalid");
-    process.exit(3);
+    console.error("unicode: Unicode encoding preconditions failed on this runtime; probe invalid (exit 125: fail the runner, do not record a non-reproduction)");
+    process.exit(125);
   }
 }
 
@@ -107,8 +107,12 @@ const { setAllowedDirectories, validatePath } = await import(
 
 function failInvalid(detail) {
   console.log(JSON.stringify({ invalid: detail }));
+  // Exit 125 = the repro runner's sandbox-fail channel: vrh repro fails
+  // loudly, exports nothing, and appends no ledger event. Any other nonzero
+  // exit would be ledgered as an ordinary non-reproduction, which would let
+  // an invalid probe pass as a refutation.
   console.error("unicode: positive control failed; probe invalid, refusing to record a non-reproduction");
-  process.exit(3);
+  process.exit(125);
 }
 
 let escaped = false;

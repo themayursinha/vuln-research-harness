@@ -44,14 +44,22 @@ surfaces:
     status: refuted
     lanes: [unicode]
     evidence: evidence/unicode/
-  - surface: expandHome tilde expansion
-    source: source/lib.ts:119-124
-    status: covered-gate
-    note: no ~-escape on this pin (homedir outside root rejected by lexical gate); not a separate lane
-  - surface: Windows drive-path rejection on POSIX hosts
+  - surface: expandHome tilde expansion (pre-gate)
+    source: source/path-utils.ts:119-124
+    status: pending
+    note: >
+      runs before the shared lexical gate; no round-1 attempt supplied a
+      tilde path, so it is unexercised. Round-2 candidate (the container
+      homedir is the scratch tmpfs, so a ~-escape needs a homedir-relative
+      secret placement the fixture does not provide).
+  - surface: Windows drive-path rejection on POSIX hosts (pre-gate)
     source: source/lib.ts:145-147
-    status: covered-gate
-    note: campaign contract is a linux container; win32 branches (path-validation.ts:72-82) out of scope
+    status: pending
+    note: >
+      runs before the shared lexical gate; no round-1 attempt supplied a
+      drive-style path. The win32 branches in path-validation.ts:72-82 are
+      additionally out of contract scope (linux container). Round-2
+      candidate for the POSIX rejection path itself.
   # Tool-level surfaces — share the gate above but carry their own post-
   # validation logic that round 1 did not individually exercise.
   - surface: read_file / read_text_file / read_media_file / read_multiple_files

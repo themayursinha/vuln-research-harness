@@ -55,10 +55,14 @@ original and the corrected runs.
    success-condition `repro_outcomes.json` is now whitelisted and committed
    so the referenced digest is inspectable from a fresh checkout.
 5. **Positive controls did not fail closed** (P2) — prefix and symlink
-   probes now exit nonzero if an in-root positive control is unexpectedly
-   rejected, so a misconfigured probe can never be recorded as a valid
-   non-reproduction. Re-runs of both lanes produced byte-identical output
-   digests to the originals, confirming the originals were healthy runs.
+   probes now fail the run via the runner's sandbox-fail exit (125) if an
+   in-root positive control is unexpectedly rejected: `vrh repro` errors
+   out, exports nothing, and appends no ledger event, so a misconfigured
+   probe can never be recorded as a valid non-reproduction. (An ordinary
+   nonzero exit would not suffice — the runner records those as ordinary
+   `vulnerable:false` outcomes.) Re-runs of both lanes produced
+   byte-identical output digests to the originals, confirming the originals
+   were healthy runs.
 
 A re-review after those fixes (same reviewer) found one residual P1, fixed
 in the same append-only manner:
@@ -77,6 +81,21 @@ in the same append-only manner:
    marker fires. Outcome unchanged: non-reproduction, new digest
    `8dc217e3702ba47f536633bd0e6bf706975de597af8e6e339d70c76589b7b23b`
    (supersedes `48a96f64…2f2b2` and the original `8f464719…4632`).
+
+A second re-review pass found two more defects, also fixed:
+
+7. **Invalid-probe exit channel** (P1) — the fail-closed exits introduced
+   in fix 5 used a plain nonzero exit code, but the repro runner records
+   every nonzero exit except 125 as an ordinary `vulnerable:false`
+   outcome; an invalid probe would still have been ledgered as a
+   non-reproduction. All three probes now use the runner's sandbox-fail
+   exit (125): the run errors out, exports nothing, and appends no ledger
+   event. All three lanes re-executed; digests unchanged.
+8. **Coverage artifact overclaimed two pre-gate surfaces** (P2) —
+   `expandHome` (path-utils.ts:119-124, citation was wrong) and the
+   Windows drive-path rejection (lib.ts:145-147) run before the shared
+   lexical gate, so no round-1 attempt exercised them; both are now
+   `pending` round-2 candidates instead of `covered-gate`.
 
 ## Calibration control (Kaiser discipline 4)
 
