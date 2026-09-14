@@ -23,11 +23,20 @@
 //   ambiguity tree: composed + canonical-order entries exist; the reordered
 //                   request byte-matches neither, so the ambiguity guard
 //                   (lib.ts:120-122) must fire.
-//   escape tree:    allowed root + a readable outside secret. Any resolution
-//                   that escapes the root produces a real secret read and
-//                   prints MCPFS-ROOT-ESCAPE; absence of the marker is then
-//                   genuine execution evidence of confinement, not a dead
-//                   oracle.
+//   escape tree:    allowed root containing a symlink whose NAME is one
+//                   byte-distinct NFC-equivalent spelling of ǭ and whose
+//                   target is the readable outside secret; the request uses
+//                   a different, byte-absent spelling. fs.realpath on the
+//                   full request ENOENTs (byte lookup fails), so the NFC
+//                   walk must resolve the equivalent prefix component — and
+//                   the per-step containment re-check (lib.ts:131-133) must
+//                   throw. If that check were removed, the walk would step
+//                   through the symlink, resolve the secret outside, and
+//                   the marker would fire, so a quiet exit is genuine
+//                   evidence, not a dead oracle. (Precondition note: like
+//                   the symlink lane, the escaping symlink is planted
+//                   directly — the tool surface cannot create symlinks;
+//                   this is a function-level mechanism probe.)
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -153,9 +162,18 @@ let escaped = false;
   console.log(JSON.stringify({ requested: `sandbox/${decompReordered} (byte-absent reordered)`, outcome }));
 }
 
-// --- Escape tree: allowed root with NO matching entries; outside secret is
-// readable. If any Unicode-spelled request resolves outside the root, the
-// read succeeds and the marker fires.
+// --- Escape tree: the per-step containment re-check in the NFC walk.
+// sandbox contains a symlink named with the canonical-order spelling whose
+// target is the outside secret directory; the request uses the reordered
+// spelling (byte-absent, NFC-equivalent). fs.realpath on the full request
+// ENOENTs, so only the walk's equivalent-match step can resolve it — and
+// its per-step realpath containment check (lib.ts:131-133) must reject it.
+// Both containment sites in lib.ts throw the same message, but the outer
+// one (lib.ts:165-166) is unreachable here: it runs only after a SUCCESSFUL
+// fs.realpath, and the byte-absent request makes realpath throw ENOENT.
+// So observing that rejection text proves the per-step check fired. If the
+// check were removed, the walk would return the outside secret path, the
+// read would succeed, and the marker would fire.
 {
   const root = path.join(scratch, "unicode-escape");
   const sandbox = path.join(root, "sandbox");
@@ -163,14 +181,51 @@ let escaped = false;
   fs.mkdirSync(sandbox, { recursive: true });
   fs.mkdirSync(outside, { recursive: true });
   fs.writeFileSync(path.join(outside, "secret.txt"), "SYNTHETIC-SECRET\n");
+  // Link the equivalent-named entry to the outside DIRECTORY (not the file):
+  // with the per-step check removed, the walk must be able to readdir the
+  // escaped directory and resolve the secret inside it, otherwise removing
+  // the check would still end in an unrelated ENOTDIR rejection and the
+  // non-reproduction would not be falsifiable.
+  fs.symlinkSync(outside, path.join(sandbox, decompOrdered));
   setAllowedDirectories([sandbox]);
   const sandboxReal = fs.realpathSync(sandbox);
-  const attempts = [
+
+  // Key attempt: byte-absent spelling of the escaping entry.
+  {
+    const requested = path.join(decompReordered, "secret.txt");
+    let outcome;
+    try {
+      const resolved = await validatePath(requested);
+      let text = "";
+      try {
+        text = fs.readFileSync(resolved, "utf8");
+        outcome = `resolved=${resolved} READ`;
+      } catch (readErr) {
+        outcome = `resolved=${resolved} read_failed=${readErr.code}`;
+      }
+      if (!resolved.startsWith(sandboxReal + path.sep) || text.includes("SYNTHETIC-SECRET")) {
+        escaped = true;
+        console.log(marker);
+        console.log(JSON.stringify({ requested, outcome }));
+      } else {
+        failInvalid(`escape attempt resolved inside but not via the expected rejection: ${resolved}`);
+      }
+    } catch (err) {
+      const msg = String(err.message).split("\n")[0];
+      if (!msg.includes("symlink target outside allowed directories")) {
+        failInvalid(`expected the per-step symlink containment rejection, got: ${msg}`);
+      }
+      outcome = `rejected via NFC-equivalent step: ${msg}`;
+    }
+    console.log(JSON.stringify({ requested, outcome }));
+  }
+
+  // Documentation attempts: equivalent-tail requests stay inside the root.
+  const tailAttempts = [
     decompReordered + "/../outside/secret.txt",
-    decompOrdered + "/../outside/secret.txt",
     composed + "/../../outside/secret.txt",
   ];
-  for (const requested of attempts) {
+  for (const requested of tailAttempts) {
     let outcome;
     try {
       const resolved = await validatePath(requested);

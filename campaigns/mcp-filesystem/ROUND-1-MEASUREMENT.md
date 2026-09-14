@@ -20,7 +20,7 @@ gate) was probed four ways and did not reproduce.
 | dotdot  | parent-directory segments through validatePath | refuted | 1029 ms | `c3094750…febd8` |
 | prefix  | allowed-directory string-prefix matching      | refuted |  896 ms | `44c5ec08…da35c` |
 | symlink | symlink inside root resolving outside         | refuted |  939 ms | `9e7d33ec…3561`  |
-| unicode | Unicode NFC-equivalent path components        | refuted |  945 ms | `48a96f64…2f2b2` |
+| unicode | Unicode NFC-equivalent path components        | refuted |  878 ms | `8dc217e3…7b23b` |
 | —       | success-condition probe (root-escape-probe)   | not reproduced | 943 ms | `2dba5dbc…aa35` |
 
 Full digests: `evidence/*/repro_outcomes.json` (per family) and
@@ -59,6 +59,24 @@ original and the corrected runs.
    rejected, so a misconfigured probe can never be recorded as a valid
    non-reproduction. Re-runs of both lanes produced byte-identical output
    digests to the originals, confirming the originals were healthy runs.
+
+A re-review after those fixes (same reviewer) found one residual P1, fixed
+in the same append-only manner:
+
+6. **Escape tree did not exercise the per-step containment check** — the
+   original escape attempts were lexically collapsed by `path.resolve` to
+   in-root paths, or rejected by the lexical gate before the NFC walk, so
+   the lane would have passed even with the walk's per-step realpath
+   containment re-check (lib.ts:131-133) removed. Corrected escape tree:
+   an in-root entry named with one byte-distinct NFC spelling of U+01ED
+   symlinks to the readable outside directory, and the request uses a
+   different, byte-absent spelling — `fs.realpath` on the full request
+   ENOENTs, so only the walk's equivalent-match step can resolve it, and
+   the per-step check must reject it. Falsifiability is by construction:
+   with the check removed, the walk resolves the outside secret and the
+   marker fires. Outcome unchanged: non-reproduction, new digest
+   `8dc217e3702ba47f536633bd0e6bf706975de597af8e6e339d70c76589b7b23b`
+   (supersedes `48a96f64…2f2b2` and the original `8f464719…4632`).
 
 ## Calibration control (Kaiser discipline 4)
 
@@ -113,8 +131,10 @@ probe.
   attacker input on this pin. Verified with byte-absent equivalent spellings
   of U+01ED (three canonical encodings): the fallback resolved the decomposed
   request to the composed entry inside the root, the reordered request raised
-  the ambiguity error, and escape attempts against a readable outside secret
-  stayed inside.
+  the ambiguity error, and an NFC-equivalent symlinked entry resolving
+  outside the root was rejected by the walk's per-step realpath containment
+  check (lib.ts:131-133) — the exact check the escape tree is built to
+  exercise, with a marker-oracle that fires if that check is removed.
 
 ## Safety
 
