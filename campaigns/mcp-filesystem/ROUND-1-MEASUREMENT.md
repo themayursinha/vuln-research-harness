@@ -17,10 +17,10 @@ gate) was probed four ways and did not reproduce.
 
 | family  | mechanism                                   | status   | probe duration | output digest (sha256) |
 |---------|---------------------------------------------|----------|----------------|------------------------|
-| dotdot  | parent-directory segments through validatePath | refuted |  914 ms | `c3094750…febd8` |
+| dotdot  | parent-directory segments through validatePath | refuted |  976 ms | `e2e29f8e…51680` |
 | prefix  | allowed-directory string-prefix matching      | refuted |  925 ms | `44c5ec08…da35c` |
 | symlink | symlink inside root resolving outside         | refuted |  885 ms | `9e7d33ec…3561`  |
-| unicode | Unicode NFC-equivalent path components        | refuted |  924 ms | `8dc217e3…7b23b` |
+| unicode | Unicode NFC-equivalent path components        | refuted |  935 ms | `ec0da4d9…76de0` |
 | —       | success-condition probe (root-escape-probe)   | not reproduced | 893 ms | `2dba5dbc…aa35` |
 
 Durations are from the final committed probe scripts (after the
@@ -28,7 +28,7 @@ post-review corrections below); output digests were stable across every
 re-execution of each lane.
 
 Full digests: `evidence/*/repro_outcomes.json` (per family) and
-`repro_outcomes.json` (baseline). Ledger: 29 events, hash-linked
+`repro_outcomes.json` (baseline). Ledger: 31 events, hash-linked
 (`ledger.jsonl`, local-only per .gitignore policy; the count includes the
 append-only correction re-executions documented below).
 
@@ -119,6 +119,27 @@ A third re-review pass found three more, also fixed:
     four distinct attack shapes across three distinct source regions and
     explicitly counts the dotdot/prefix convergence on the shared lexical
     containment gate, instead of claiming four disjoint source regions.
+
+A fourth re-review pass (same reviewer) found three more, also fixed:
+
+12. **Internal board identifier in coverage.yaml** (P1) — removed; the
+    public-data rule covers any internal identifier, not just hostnames.
+13. **Marker could fire without an observed impact** (P1) — the escape
+    tree emitted the marker when validatePath returned any outside path,
+    even if the subsequent read failed; the campaign's success condition
+    is *reading* the synthetic secret. The marker now fires only after the
+    read returns content containing the secret; any outside resolution
+    without a readable secret fails the probe (exit 125), and the compat
+    tree treats an outside resolution as invalid for the same reason.
+    Outcome unchanged: non-reproduction, new digest
+    `ec0da4d89dc6f4276da8f64ccae899588de782cd0d75aeea5bcaa4eefd876de0`.
+14. **dotdot lane lacked a positive control** (P2) — a compiled validator
+    that rejected everything would have produced a quiet exit and been
+    recorded as a refutation. The lane now validates and reads an in-root
+    fixture file first and fails the run (exit 125) if that control
+    fails. Outcome unchanged: non-reproduction, new digest
+    `e2e29f8ef720beabe7b12b1b0a5d04fbf6934f9c5784e94dcb8f9f627fa51680`
+    (supersedes `c3094750…febd8`).
 
 ## Calibration control (Kaiser discipline 4)
 

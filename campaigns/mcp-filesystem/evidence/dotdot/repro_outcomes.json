@@ -4,8 +4,8 @@
     "finding": "H-MCPFS-DOTDOT",
     "vulnerable": false,
     "exit_code": 0,
-    "duration_ms": 914,
-    "output_digest": "c30947503bb089eaba30de0f411cd108a0abb314afe811887620173d105febd8",
+    "duration_ms": 976,
+    "output_digest": "e2e29f8ef720beabe7b12b1b0a5d04fbf6934f9c5784e94dcb8f9f627fa51680",
     "error": "marker not observed on stdout; finding did not reproduce"
   }
 ]

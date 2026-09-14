@@ -14,7 +14,7 @@
 // distinct canonically-equivalent spellings — the fully composed character,
 // o+ogonek+macron (canonical mark order: ccc 202 < 230), and the reordered
 // o+macron+ogonek (canonical ordering re-sorts it). The probe asserts these
-// encoding facts at startup and fails closed (exit 3) if they do not hold
+// encoding facts at startup and fails closed (exit 125) if they do not hold
 // on this runtime, rather than silently testing nothing.
 //
 // Trees (separate so the byte-absence preconditions cannot interfere):
@@ -142,12 +142,15 @@ let escaped = false;
     const resolved = await validatePath(path.join(sandbox, decompOrdered));
     const text = fs.readFileSync(resolved, "utf8"); // must exist via fallback
     const inside = resolved.startsWith(sandboxReal + path.sep);
+    // The compat tree has no outside secret fixture: an outside resolution
+    // is a containment break without observable impact, which is an invalid
+    // probe, never a marker. The marker means the campaign's read-impact
+    // reproduced, and only the escape tree can observe that.
     if (!inside) {
-      escaped = true;
-      console.log(marker);
+      failInvalid(`compat case resolved outside the root: ${resolved}`);
     }
-    if (!inside || !text.includes("SYNTHETIC-INSIDE")) {
-      failInvalid(`compat case did not resolve+read inside the root: resolved=${resolved} inside=${inside}`);
+    if (!text.includes("SYNTHETIC-INSIDE")) {
+      failInvalid(`compat case resolved+read but content is not the synthetic file: ${resolved}`);
     }
     outcome = `resolved=${resolved} via_nfc_fallback inside_root=${inside} content=${text.trim()}`;
   } catch (err) {
@@ -206,25 +209,33 @@ let escaped = false;
   setAllowedDirectories([sandbox]);
   const sandboxReal = fs.realpathSync(sandbox);
 
-  // Key attempt: byte-absent spelling of the escaping entry.
+  // Key attempt: byte-absent spelling of the escaping entry. Expected
+  // behavior on this pin: rejection by the per-step containment guard. Any
+  // resolution is either a reproduced read-impact (marker, only when the
+  // synthetic secret was actually read — an outside-but-unreadable result
+  // is a broken fixture, not an observed impact) or an invalid probe.
   {
     const requested = path.join(decompReordered, "secret.txt");
     let outcome;
     try {
       const resolved = await validatePath(requested);
       let text = "";
+      let readOK = true;
+      let readErrCode = "";
       try {
         text = fs.readFileSync(resolved, "utf8");
-        outcome = `resolved=${resolved} READ`;
       } catch (readErr) {
-        outcome = `resolved=${resolved} read_failed=${readErr.code}`;
+        readOK = false;
+        readErrCode = readErr.code;
       }
-      if (!resolved.startsWith(sandboxReal + path.sep) || text.includes("SYNTHETIC-SECRET")) {
+      if (readOK && text.includes("SYNTHETIC-SECRET")) {
         escaped = true;
         console.log(marker);
-        console.log(JSON.stringify({ requested, outcome }));
+        outcome = `resolved=${resolved} SECRET READ`;
+      } else if (!resolved.startsWith(sandboxReal + path.sep)) {
+        failInvalid(`escape attempt resolved outside the root without a readable synthetic secret; fixture broken: ${resolved} read=${readOK ? "content-not-secret" : readErrCode}`);
       } else {
-        failInvalid(`escape attempt resolved inside but not via the expected rejection: ${resolved}`);
+        failInvalid(`escape attempt resolved inside (${resolved}) instead of being rejected by the per-step guard`);
       }
     } catch (err) {
       const msg = String(err.message).split("\n")[0];
@@ -246,15 +257,22 @@ let escaped = false;
     try {
       const resolved = await validatePath(requested);
       let text = "";
+      let readOK = true;
+      let readErrCode = "";
       try {
         text = fs.readFileSync(resolved, "utf8");
-        outcome = `resolved=${resolved} READ`;
       } catch (readErr) {
-        outcome = `resolved=${resolved} read_failed=${readErr.code}`;
+        readOK = false;
+        readErrCode = readErr.code;
       }
-      if (!resolved.startsWith(sandboxReal + path.sep) || text.includes("SYNTHETIC-SECRET")) {
+      if (readOK && text.includes("SYNTHETIC-SECRET")) {
         escaped = true;
         console.log(marker);
+        outcome = `resolved=${resolved} SECRET READ`;
+      } else if (!resolved.startsWith(sandboxReal + path.sep)) {
+        failInvalid(`tail attempt resolved outside the root without a readable synthetic secret; fixture broken: ${resolved}`);
+      } else {
+        outcome = `resolved=${resolved} inside_root read=${readOK ? "ok" : readErrCode}`;
       }
     } catch (err) {
       outcome = `rejected: ${String(err.message).split("\n")[0]}`;

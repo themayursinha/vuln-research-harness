@@ -8,8 +8,8 @@
 #   refuted         mechanism probed against this pin and rejected, with evidence
 # A surface only becomes a finding through the crash-first rule: reproduced
 # execution of the claimed impact (marker on stdout in the locked lane).
-# Pilot-level artifact pending the harness-level design decision (board
-# t_94188474); this file does not change harness code.
+# Pilot-level artifact pending the harness-level design decision for
+# coverage/output discipline; this file does not change harness code.
 
 campaign: mcp-filesystem
 pin: modelcontextprotocol/servers src/filesystem @ d73f99efbfd40c3aa1b61e88728b3d49fb52608f

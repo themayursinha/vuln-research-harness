@@ -74,6 +74,24 @@ const { setAllowedDirectories, validatePath } = await import(
 const sandbox = path.resolve(snapshot, "sandbox");
 setAllowedDirectories([sandbox]);
 
+// Positive control: an in-root fixture file must validate and read. If the
+// compiled validator rejects everything (broken setup, wrong snapshot, a
+// runtime where the gate misbehaves), every escape attempt below would land
+// in the catch and a quiet exit would be recorded as a refutation. Fail
+// closed via the runner's sandbox-fail exit (125) instead: no export, no
+// ledger event.
+{
+  const control = path.join(sandbox, "public.txt");
+  try {
+    const resolved = await validatePath(control);
+    fs.readFileSync(resolved, "utf8");
+    console.log(JSON.stringify({ requested: "sandbox/public.txt (positive control)", outcome: `resolved=${resolved} read ok (expected)` }));
+  } catch (err) {
+    console.error("dotdot: positive control failed; probe invalid, failing the run (exit 125):", String(err.message).split("\n")[0]);
+    process.exit(125);
+  }
+}
+
 const attempts = [
   "../outside/secret.txt",
   "./../outside/secret.txt",
