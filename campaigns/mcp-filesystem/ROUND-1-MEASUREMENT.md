@@ -17,15 +17,20 @@ gate) was probed four ways and did not reproduce.
 
 | family  | mechanism                                   | status   | probe duration | output digest (sha256) |
 |---------|---------------------------------------------|----------|----------------|------------------------|
-| dotdot  | parent-directory segments through validatePath | refuted | 1029 ms | `c3094750…febd8` |
-| prefix  | allowed-directory string-prefix matching      | refuted |  896 ms | `44c5ec08…da35c` |
-| symlink | symlink inside root resolving outside         | refuted |  939 ms | `9e7d33ec…3561`  |
-| unicode | Unicode NFC-equivalent path components        | refuted |  878 ms | `8dc217e3…7b23b` |
-| —       | success-condition probe (root-escape-probe)   | not reproduced | 943 ms | `2dba5dbc…aa35` |
+| dotdot  | parent-directory segments through validatePath | refuted |  914 ms | `c3094750…febd8` |
+| prefix  | allowed-directory string-prefix matching      | refuted |  925 ms | `44c5ec08…da35c` |
+| symlink | symlink inside root resolving outside         | refuted |  885 ms | `9e7d33ec…3561`  |
+| unicode | Unicode NFC-equivalent path components        | refuted |  924 ms | `8dc217e3…7b23b` |
+| —       | success-condition probe (root-escape-probe)   | not reproduced | 893 ms | `2dba5dbc…aa35` |
+
+Durations are from the final committed probe scripts (after the
+post-review corrections below); output digests were stable across every
+re-execution of each lane.
 
 Full digests: `evidence/*/repro_outcomes.json` (per family) and
-`repro_outcomes.json` (baseline). Ledger: 22 events, hash-linked
-(`ledger.jsonl`, local-only per .gitignore policy).
+`repro_outcomes.json` (baseline). Ledger: 29 events, hash-linked
+(`ledger.jsonl`, local-only per .gitignore policy; the count includes the
+append-only correction re-executions documented below).
 
 ## Post-review corrections (2026-09-14, same day)
 
@@ -97,6 +102,24 @@ A second re-review pass found two more defects, also fixed:
    lexical gate, so no round-1 attempt exercised them; both are now
    `pending` round-2 candidates instead of `covered-gate`.
 
+A third re-review pass found three more, also fixed:
+
+9. **Prerequisite failures still used ordinary exits** (P1) — the
+   fail-closed channel introduced in fix 7 covered only the explicit
+   positive-control checks; a tsc compile failure (exit 2), a missing
+   environment variable, or any uncaught exception in a probe would still
+   have been ledgered as an ordinary non-reproduction. All four probes and
+   the baseline `scripts/repro.mjs` now install uncaughtException /
+   unhandledRejection handlers and route every prerequisite failure
+   through exit 125. All lanes and the baseline re-executed; every output
+   digest unchanged, confirming healthy runs.
+10. **Stale durations in this table** (P2) — the table now reports the
+    durations from the final exported outcomes of the last re-execution.
+11. **Diversity overstatement** (P2) — the diversity bullet now reports
+    four distinct attack shapes across three distinct source regions and
+    explicitly counts the dotdot/prefix convergence on the shared lexical
+    containment gate, instead of claiming four disjoint source regions.
+
 ## Calibration control (Kaiser discipline 4)
 
 `campaigns/fixture-lab` — known planted path-join bug F-LAB-001 —
@@ -108,11 +131,15 @@ probe.
 
 ## Measured dimensions (roadmap Phase 4)
 
-- **Approach diversity**: 4/4 dispatched lanes used incompatible mechanisms
-  (lexical containment, realpath containment, separator-prefix matching,
-  NFC-equivalence walk) targeting four distinct source regions
+- **Approach diversity**: 4/4 dispatched lanes used incompatible attack
+  shapes (parent-segment traversal, separator-prefix siblings, symlink
+  resolution, NFC-equivalent spelling) across three distinct source regions
   (path-validation.ts:11-86, lib.ts:77-97, lib.ts:160-168, lib.ts:100-138).
-  No convergence: zero families converged on the same code path or hypothesis.
+  Convergence accounting: dotdot and prefix both terminate at the shared
+  lexical containment gate (`isPathWithinAllowedDirectories`,
+  path-validation.ts:84) — two shapes, one gate — while symlink and unicode
+  exercise distinct later guards (realpath containment, NFC walk). Zero
+  families converged on the same hypothesis.
 - **False positives**: 0. No lane reported a finding; no candidate entered
   the adversarial lane (0 validation_verdict events). Nothing was refuted by
   validation because nothing was claimed beyond its artifact — the crash-first

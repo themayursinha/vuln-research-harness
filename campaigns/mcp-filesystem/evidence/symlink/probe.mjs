@@ -13,12 +13,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+// Fail-closed safety net: any uncaught error must take the runner's
+// sandbox-fail exit (125), never an ordinary nonzero exit that would be
+// ledgered as a valid non-reproduction.
+process.on("uncaughtException", (err) => {
+  console.error("probe invalid (uncaught exception):", err?.message || err);
+  process.exit(125);
+});
+process.on("unhandledRejection", (err) => {
+  console.error("probe invalid (unhandled rejection):", String(err?.message || err));
+  process.exit(125);
+});
+
 const snapshot = process.env.VRH_SNAPSHOT;
 const scratch = process.env.VRH_SCRATCH;
 const marker = "MCPFS-ROOT-ESCAPE";
 if (!snapshot || !scratch) {
   console.error("VRH_SNAPSHOT and VRH_SCRATCH are required");
-  process.exit(2);
+  process.exit(125);
 }
 
 const srcDir = path.join(scratch, "src");
@@ -54,7 +66,7 @@ try {
 } catch (err) {
   const detail = err.stdout?.toString() || err.stderr?.toString() || err.message;
   console.error("tsc failed:", detail);
-  process.exit(2);
+  process.exit(125);
 }
 
 const { setAllowedDirectories, validatePath } = await import(
