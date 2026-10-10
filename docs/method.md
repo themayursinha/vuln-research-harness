@@ -40,3 +40,17 @@ A model report is a lead, not evidence. Evidence is an artifact such as:
 - impact proof using synthetic data only.
 
 The claim must never exceed the strongest artifact.
+
+## Code map
+
+`vrh codemap` indexes the pinned snapshot into functions and direct call
+edges. `vrh codemap reach` lists the files reachable from an entry point.
+`vrh codemap slice` keeps that file set only when it fits a bound, and
+`vrh round plan` can attach the slice to each worker request in the round.
+
+The map is syntactic: Go functions and methods, Python `def`, and JavaScript
+or TypeScript `function` declarations. Ambiguous or unresolved calls are not
+treated as reachable. Python imports resolve only to a same-directory module
+file. JavaScript and TypeScript imports resolve only to a relative file in
+the snapshot. It is not a type checker, a taint engine, or a weakness lens,
+and a slice is not evidence.

@@ -39,3 +39,15 @@
 The first pilot must not target live infrastructure and must not become a
 large autonomous agent platform before the contract, evidence, and isolation
 semantics are proven.
+
+## Code map
+
+Not part of the phase 4 pilot measurement. A pinned snapshot can be indexed
+into functions and direct call edges. Reachability from an entry point
+returns files. A bounded slice of that file set can be attached to a round.
+This is not a taint engine, a type checker, or a weakness-lens pass.
+
+- [x] `vrh codemap index`
+- [x] `vrh codemap reach`
+- [x] `vrh codemap slice` and optional `vrh round plan` slice attachment
+- [ ] Type-aware calls, taint, and weakness lenses
