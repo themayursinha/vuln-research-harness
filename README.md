@@ -16,6 +16,9 @@ synthetic path-join lab and a pinned official filesystem MCP server. Next: a
 bounded four-worker campaign against that MCP fixture (four approach
 families, schema triage, `vrh round plan . 4`), then measurement.
 An automated agent runner and microVM adapter are not built yet.
+`vrh codemap` can index a pinned snapshot into functions and direct call
+edges, list the files reachable from an entry point, and attach a bounded
+slice to a round. That index is not a taint engine.
 See [docs/roadmap.md](docs/roadmap.md) and [docs/campaigns.md](docs/campaigns.md).
 
 ## Why
@@ -92,12 +95,19 @@ vrh round ingest ./campaigns/mcp-filesystem-server
 
 # Review sanitized MCP tool schemas offline (hypotheses only; no target execution)
 vrh review-mcp-schema ./tools.json
+
+# Index the pinned snapshot, then keep a worker inside the files reachable
+# from one entry point. This is not taint or a type check.
+vrh codemap index ./campaigns/mcp-filesystem-server
+vrh codemap reach ./campaigns/mcp-filesystem-server path/file.ext#symbol
+vrh codemap slice ./campaigns/mcp-filesystem-server path/file.ext#symbol 32
+vrh round plan ./campaigns/mcp-filesystem-server 4 path/to/slice.json
 ```
 
 ## Repository layout
 
 ```
-cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox, campaign status, review-mcp-schema)
+cmd/vrh/            CLI entry point (init, validate, snapshot, families, round, repro, adversarial, verify-sandbox, campaign status, review-mcp-schema, codemap)
 campaigns/fixture-lab/  reference synthetic campaign (see README there)
 campaigns/mcp-filesystem/  official filesystem MCP server, local fixture (see README there)
 internal/contract/  campaign contract load/validate (YAML, digest-pinned)
@@ -113,6 +123,7 @@ internal/container/ disposable OCI adapter (digest-pinned image, network none)
 internal/sandbox/   network-denial probes (fail-closed)
 internal/validate/  adversarial disproof lane
 internal/mcpreview/ offline MCP tool-schema reviewer (trust-boundary hypotheses only)
+internal/codemap/   syntactic function and call index, reachability, and bounded slices (no taint)
 docs/               method, safety model, contract reference, campaign layout, roadmap
 ```
 

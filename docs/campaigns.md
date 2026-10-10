@@ -11,6 +11,8 @@ campaigns/<name>/
   registry.json      approach families (vrh families ...)
   state.json         coordinator round state
   ledger.jsonl       hash-linked evidence ledger
+  codemap.json       syntactic function/call index (vrh codemap index)
+  codemap-slices/    bounded file sets for a worker (vrh codemap slice)
   inbox/
     requests/        one JSON envelope per dispatched request
     results/         one JSON envelope per worker result
@@ -33,7 +35,12 @@ vrh families add campaigns/<name> cache  "cache poisoning"
 vrh families seed campaigns/<name>
 vrh families seed campaigns/<name> approaches.yaml
 
+vrh codemap index campaigns/<name>
+vrh codemap reach campaigns/<name> path/file.ext#symbol
+vrh codemap slice campaigns/<name> path/file.ext#symbol 32
 vrh round plan campaigns/<name> 3      # publishes request envelopes
+# optional third argument attaches a codemap slice to every request
+vrh round plan campaigns/<name> 3 campaigns/<name>/codemap-slices/<id>.json
 # workers execute in their own isolation; each returns a result envelope
 # with capability claims into inbox/results/
 vrh round ingest campaigns/<name>      # verifies gate + schema, updates registry
@@ -44,11 +51,21 @@ vrh adversarial campaigns/<name> F1 attempts.json "finding stands"
 vrh campaign status campaigns/<name>   # round, families, outstanding requests, repro/validation ledger events
 ```
 
-`round plan`, `round ingest`, `vrh repro`, and `vrh adversarial` all run the **admission gate** first: the
+`round plan`, `round ingest`, `vrh repro`, `vrh adversarial`, and `vrh codemap` all run the **admission gate** first: the
 contract must load and validate, the campaign `source_snapshot` must equal
 the manifest digest, and the source tree must still verify against the
 manifest — including a check that no file was added or removed since the
 snapshot.
+
+`vrh codemap index` reads only files listed in that manifest and writes
+`codemap.json`. Reach and slice refuse the file when it does not match a
+fresh index of the pinned tree. The graph is syntactic direct calls only
+(Go functions and methods, Python `def`, JavaScript/TypeScript `function`
+declarations). Ambiguous calls are not reachable. A slice that does not fit
+`max-files` (at most 128) is rejected rather than truncated. The index is
+not evidence and not a taint pass. When `round plan` is given a slice, every
+request in that round gets the entry point and file set in its context, and
+the existing envelope digest covers that context.
 
 Reference campaigns in this repository: `campaigns/fixture-lab` (synthetic
 path-join lab) and `campaigns/mcp-filesystem` (pinned official filesystem
