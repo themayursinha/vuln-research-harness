@@ -190,15 +190,15 @@ func manifestFiles(mani manifest.Manifest) map[string]struct{} {
 }
 
 func refuseInsideSource(dest, source string) error {
-	destAbs, err := filepath.Abs(dest)
+	destResolved, err := resolveExisting(dest)
 	if err != nil {
 		return err
 	}
-	sourceAbs, err := filepath.Abs(source)
+	sourceResolved, err := resolveExisting(source)
 	if err != nil {
 		return err
 	}
-	rel, err := filepath.Rel(sourceAbs, destAbs)
+	rel, err := filepath.Rel(sourceResolved, destResolved)
 	if err != nil {
 		return err
 	}
@@ -206,4 +206,37 @@ func refuseInsideSource(dest, source string) error {
 		return fmt.Errorf("refusing to write %s inside the pinned source tree", dest)
 	}
 	return nil
+}
+
+// resolveExisting resolves the longest prefix of path that exists. Symlinks
+// on that prefix are expanded, so a campaign path that points into the pinned
+// source tree is compared as the real destination. A dangling symlink is an
+// error: writing through it would create the target.
+func resolveExisting(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	var missing []string
+	cur := abs
+	for {
+		if _, err := os.Lstat(cur); err == nil {
+			resolved, err := filepath.EvalSymlinks(cur)
+			if err != nil {
+				return "", fmt.Errorf("resolve %s: %w", path, err)
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return resolved, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return abs, nil
+		}
+		missing = append(missing, filepath.Base(cur))
+		cur = parent
+	}
 }
