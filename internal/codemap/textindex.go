@@ -692,13 +692,17 @@ func blankQuoted(b []byte, i int, quote byte) int {
 }
 
 func blankTemplate(b []byte, i int) (int, error) {
+	if i >= len(b) || b[i] != '`' {
+		return 0, errors.New("unclosed template string")
+	}
 	b[i] = ' '
 	i++
 	for i < len(b) {
+		// Escapes cover the next source character, so \${helper()} stays a
+		// literal and does not become a call. A doubled backslash ends the
+		// escape and the following ${ is a real interpolation.
 		if b[i] == '\\' && i+1 < len(b) {
-			if b[i] != '\n' {
-				b[i] = ' '
-			}
+			b[i] = ' '
 			i++
 			if b[i] != '\n' {
 				b[i] = ' '
@@ -710,10 +714,86 @@ func blankTemplate(b []byte, i int) (int, error) {
 			b[i] = ' '
 			return i + 1, nil
 		}
+		if b[i] == '$' && i+1 < len(b) && b[i+1] == '{' {
+			b[i] = ' '
+			b[i+1] = ' '
+			next, err := blankTemplateExpr(b, i+2)
+			if err != nil {
+				return 0, err
+			}
+			i = next
+			continue
+		}
 		if b[i] != '\n' {
 			b[i] = ' '
 		}
 		i++
 	}
 	return 0, errors.New("unclosed template string")
+}
+
+// blankTemplateExpr scans one ${...} expression. The expression text is left
+// in place so calls inside it still produce edges. Strings, comments, and
+// nested templates are blanked, and their braces do not end the expression.
+// The closing "}" is blanked.
+func blankTemplateExpr(b []byte, i int) (int, error) {
+	depth := 0
+	for i < len(b) {
+		if b[i] == '/' && i+1 < len(b) && b[i+1] == '/' {
+			for i < len(b) && b[i] != '\n' {
+				b[i] = ' '
+				i++
+			}
+			continue
+		}
+		if b[i] == '/' && i+1 < len(b) && b[i+1] == '*' {
+			b[i], b[i+1] = ' ', ' '
+			i += 2
+			closed := false
+			for i < len(b) {
+				if b[i] == '*' && i+1 < len(b) && b[i+1] == '/' {
+					b[i], b[i+1] = ' ', ' '
+					i += 2
+					closed = true
+					break
+				}
+				if b[i] != '\n' {
+					b[i] = ' '
+				}
+				i++
+			}
+			if !closed {
+				return 0, errors.New("unclosed block comment")
+			}
+			continue
+		}
+		if b[i] == '\'' || b[i] == '"' {
+			i = blankQuoted(b, i, b[i])
+			continue
+		}
+		if b[i] == '`' {
+			next, err := blankTemplate(b, i)
+			if err != nil {
+				return 0, err
+			}
+			i = next
+			continue
+		}
+		if b[i] == '{' {
+			depth++
+			i++
+			continue
+		}
+		if b[i] == '}' {
+			if depth == 0 {
+				b[i] = ' '
+				return i + 1, nil
+			}
+			depth--
+			i++
+			continue
+		}
+		i++
+	}
+	return 0, errors.New("unclosed template interpolation")
 }
