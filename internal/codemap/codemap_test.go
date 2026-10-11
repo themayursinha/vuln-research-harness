@@ -376,6 +376,79 @@ func TestQualifiedImportDoesNotMatchBareName(t *testing.T) {
 	}
 }
 
+func TestTemplateInterpolationCallsStayReachable(t *testing.T) {
+	root := t.TempDir()
+	app := strings.ReplaceAll(`import { helper, label } from "./dep.js";
+export function run() {
+  return BACKTICKnotCalled() ${helper({n: 1})} ${label(BACKTICK${helper()}BACKTICK)}BACKTICK;
+}
+export function commented() {
+  return BACKTICK${ /* } */ helper() }BACKTICK;
+}
+export function quoted() {
+  return BACKTICK${ "}" + helper() }BACKTICK;
+}
+export function lineNote() {
+  return BACKTICK${ // }
+helper() }BACKTICK;
+}
+export function escaped() {
+  return BACKTICKnotCalled() \${helper()}BACKTICK;
+}
+export function doubled() {
+  return BACKTICK\\${helper()}BACKTICK;
+}
+`, "BACKTICK", "`")
+	writeFiles(t, root, map[string]string{
+		"app.js":   app,
+		"dep.ts":   "export function helper(x) { return x; }\nexport function label(s) { return s; }\n",
+		"decoy.js": "export function notCalled() { return 1; }\n",
+	})
+	graph := indexTree(t, root)
+	for _, entry := range []string{"app.js#run", "app.js#commented", "app.js#quoted", "app.js#lineNote", "app.js#doubled"} {
+		files, _, err := graph.Reachable(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(files, []string{"app.js", "dep.ts"}) {
+			t.Fatalf("%s files = %v edges=%v", entry, files, resolvedEdges(graph))
+		}
+	}
+	if !hasEdge(graph, "app.js#run", "dep.ts#helper") || !hasEdge(graph, "app.js#run", "dep.ts#label") {
+		t.Fatalf("edges = %v", resolvedEdges(graph))
+	}
+	for _, edge := range graph.Edges {
+		if edge.Call == "notCalled" {
+			t.Fatalf("literal segment produced a call: %+v", edge)
+		}
+	}
+	files, _, err := graph.Reachable("app.js#escaped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(files, []string{"app.js"}) {
+		t.Fatalf("escaped files = %v edges=%v", files, resolvedEdges(graph))
+	}
+	files, _, err = graph.Reachable("decoy.js#notCalled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(files, []string{"decoy.js"}) {
+		t.Fatalf("decoy files = %v", files)
+	}
+}
+
+func TestUnclosedTemplateInterpolation(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"bad.ts": "export function run() {\n  return `${helper(\n",
+	})
+	_, err := Index(root, testSHA, []string{"bad.ts"})
+	if err == nil || !strings.Contains(err.Error(), "unclosed") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestGoPackageLevelCall(t *testing.T) {
 	root := t.TempDir()
 	writeFiles(t, root, map[string]string{
