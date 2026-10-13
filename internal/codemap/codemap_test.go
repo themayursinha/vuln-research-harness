@@ -449,6 +449,161 @@ func TestUnclosedTemplateInterpolation(t *testing.T) {
 	}
 }
 
+func TestWriteAtomicIgnoresSidecarSymlink(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	if err := os.Mkdir(source, 0700); err != nil {
+		t.Fatal(err)
+	}
+	planted := filepath.Join(source, "secret.go")
+	original := []byte("package secret\nfunc Keep() {}\n")
+	if err := os.WriteFile(planted, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	campaign := filepath.Join(root, "campaign")
+	if err := os.Mkdir(campaign, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(campaign, "codemap.json")
+	sidecar := dest + ".tmp"
+	if err := os.Symlink(planted, sidecar); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("{\"ok\":true}\n")
+	if err := writeAtomic(dest, payload); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(planted); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("sidecar symlink was followed: %q %v", got, err)
+	}
+	if got, err := os.ReadFile(dest); err != nil || !bytes.Equal(got, payload) {
+		t.Fatalf("dest = %q %v", got, err)
+	}
+	info, err := os.Lstat(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("predictable sidecar was replaced")
+	}
+
+	danglingDir := filepath.Join(root, "dangling")
+	if err := os.Mkdir(danglingDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(source, "missing.go")
+	if err := os.Symlink(missing, filepath.Join(danglingDir, "slice.json.tmp")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAtomic(filepath.Join(danglingDir, "slice.json"), payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(missing); !os.IsNotExist(err) {
+		t.Fatal("dangling sidecar was created")
+	}
+}
+
+func TestPythonFStringCallsStayReachable(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"app.py": "from dep import helper, label\n" +
+			"def run():\n" +
+			"    return f\"notCalled() {helper()} {label(f'{helper()}')}\"\n" +
+			"def formatted():\n" +
+			"    return f\"{helper():.2f}\"\n" +
+			"def quoted():\n" +
+			"    return f\"{helper('}')}\"\n" +
+			"def escaped():\n" +
+			"    return f\"notCalled() {{helper()}}\"\n" +
+			"def plain():\n" +
+			"    return \"notCalled() {helper()}\"\n",
+		"dep.py":   "def helper(x=None):\n    return x\ndef label(s):\n    return s\n",
+		"decoy.py": "def notCalled():\n    return 1\n",
+	})
+	graph := indexTree(t, root)
+	for _, entry := range []string{"app.py#run", "app.py#formatted", "app.py#quoted"} {
+		files, _, err := graph.Reachable(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(files, []string{"app.py", "dep.py"}) {
+			t.Fatalf("%s files = %v edges=%v", entry, files, resolvedEdges(graph))
+		}
+	}
+	if !hasEdge(graph, "app.py#run", "dep.py#helper") || !hasEdge(graph, "app.py#run", "dep.py#label") {
+		t.Fatalf("edges = %v", resolvedEdges(graph))
+	}
+	for _, edge := range graph.Edges {
+		if edge.Call == "notCalled" {
+			t.Fatalf("literal f-string text produced a call: %+v", edge)
+		}
+	}
+	for _, entry := range []string{"app.py#escaped", "app.py#plain"} {
+		files, _, err := graph.Reachable(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(files, []string{"app.py"}) {
+			t.Fatalf("%s files = %v edges=%v", entry, files, resolvedEdges(graph))
+		}
+	}
+}
+
+func TestUnclosedFStringReplacement(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"bad.py": "def run():\n    return f\"{helper(\n",
+	})
+	_, err := Index(root, testSHA, []string{"bad.py"})
+	if err == nil || !strings.Contains(err.Error(), "unclosed") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGoSelectorUsesFileImports(t *testing.T) {
+	alias := t.TempDir()
+	writeFiles(t, alias, map[string]string{
+		"main.go":            "package main\nimport authz \"example.com/app/left/auth\"\nimport other \"example.com/app/right/auth\"\nfunc main() { authz.Check() }\nfunc otherEntry() { other.Check() }\n",
+		"left/auth/auth.go":  "package auth\nfunc Check() {}\n",
+		"right/auth/auth.go": "package auth\nfunc Check() { side() }\nfunc side() {}\n",
+	})
+	graph := indexTree(t, alias)
+	files, _, err := graph.Reachable("main.go#main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(files, []string{"left/auth/auth.go", "main.go"}) {
+		t.Fatalf("alias files = %v edges=%v", files, resolvedEdges(graph))
+	}
+	if !hasEdge(graph, "main.go#main", "left/auth/auth.go#Check") {
+		t.Fatalf("edges = %v", resolvedEdges(graph))
+	}
+	files, _, err = graph.Reachable("main.go#otherEntry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(files, []string{"main.go", "right/auth/auth.go"}) {
+		t.Fatalf("other files = %v edges=%v", files, resolvedEdges(graph))
+	}
+
+	method := t.TempDir()
+	writeFiles(t, method, map[string]string{
+		"caller.go":       "package caller\nfunc Run() {\n\tvar auth Gate\n\tauth.Check()\n}\ntype Gate struct{}\nfunc (g Gate) Check() {}\n",
+		"pkgauth/auth.go": "package auth\nfunc Check() { side() }\nfunc side() {}\n",
+	})
+	graph = indexTree(t, method)
+	files, _, err = graph.Reachable("caller.go#Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(files, []string{"caller.go"}) {
+		t.Fatalf("method files = %v edges=%v", files, resolvedEdges(graph))
+	}
+	if !hasEdge(graph, "caller.go#Run", "caller.go#Gate.Check") {
+		t.Fatalf("edges = %v", resolvedEdges(graph))
+	}
+}
+
 func TestGoPackageLevelCall(t *testing.T) {
 	root := t.TempDir()
 	writeFiles(t, root, map[string]string{
