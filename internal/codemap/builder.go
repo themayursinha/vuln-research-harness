@@ -36,14 +36,23 @@ type rawImport struct {
 	targetSymbol string
 }
 
+// rawGoImport is one Go import in a file. local is empty when the file uses
+// the path's base name, "." for a dot import, and "_" for a blank import.
+type rawGoImport struct {
+	file  string
+	local string
+	path  string
+}
+
 type builder struct {
-	funcs    []rawFunc
-	calls    []rawCall
-	imports  []rawImport
-	aliases  map[string]struct{}
-	bound    map[string]string
-	edges    []Edge
-	seenEdge map[string]struct{}
+	funcs     []rawFunc
+	calls     []rawCall
+	imports   []rawImport
+	goImports []rawGoImport
+	aliases   map[string]struct{}
+	bound     map[string]string
+	edges     []Edge
+	seenEdge  map[string]struct{}
 }
 
 func newBuilder() *builder {
@@ -64,6 +73,10 @@ func (b *builder) addCall(call rawCall) {
 
 func (b *builder) addImport(imp rawImport) {
 	b.imports = append(b.imports, imp)
+}
+
+func (b *builder) addGoImport(file, local, importPath string) {
+	b.goImports = append(b.goImports, rawGoImport{file: file, local: local, path: importPath})
 }
 
 func (b *builder) addAlias(file, name string) {
@@ -106,7 +119,6 @@ func (b *builder) lookup(file, symbol string) (string, bool) {
 func (b *builder) resolve() {
 	byID := make(map[string]rawFunc, len(b.funcs))
 	byPkg := map[string][]rawFunc{}
-	pkgKeys := map[string]map[string]struct{}{}
 	for _, fn := range b.funcs {
 		byID[fn.id] = fn
 		if fn.lang != "go" {
@@ -114,21 +126,128 @@ func (b *builder) resolve() {
 		}
 		key := pkgKey(fn.dir, fn.pkg)
 		byPkg[key] = append(byPkg[key], fn)
-		if pkgKeys[fn.pkg] == nil {
-			pkgKeys[fn.pkg] = map[string]struct{}{}
-		}
-		pkgKeys[fn.pkg][key] = struct{}{}
 	}
+	fileImports, dotImports := b.goImportBindings(byPkg)
 	for _, call := range b.calls {
 		if call.lang == "go" {
-			b.resolveGo(call, byPkg, pkgKeys)
+			b.resolveGo(call, byPkg, fileImports, dotImports)
 			continue
 		}
 		b.resolveText(call, byID)
 	}
 }
 
-func (b *builder) resolveGo(call rawCall, byPkg map[string][]rawFunc, pkgKeys map[string]map[string]struct{}) {
+// goBinding is one name a Go file can use as a selector. ok is false when
+// the import does not match exactly one snapshot directory, or the name is
+// declared twice. An unresolved import is still a binding, so the qualifier
+// is not treated as a method receiver.
+type goBinding struct {
+	dir string
+	ok  bool
+}
+
+func (b *builder) goImportBindings(byPkg map[string][]rawFunc) (map[string]map[string]goBinding, map[string][]string) {
+	dirs := map[string]struct{}{}
+	for key := range byPkg {
+		dir, _, _ := strings.Cut(key, "\x00")
+		dirs[dir] = struct{}{}
+	}
+	fileImports := map[string]map[string]goBinding{}
+	dotImports := map[string][]string{}
+	for _, imp := range b.goImports {
+		local := imp.local
+		if local == "" {
+			local = pathBase(imp.path)
+		}
+		if local == "_" || local == "" {
+			continue
+		}
+		dir, ok := matchGoDir(imp.path, dirs)
+		if local == "." {
+			if ok {
+				dotImports[imp.file] = append(dotImports[imp.file], dir)
+			}
+			continue
+		}
+		if fileImports[imp.file] == nil {
+			fileImports[imp.file] = map[string]goBinding{}
+		}
+		if _, exists := fileImports[imp.file][local]; exists {
+			fileImports[imp.file][local] = goBinding{}
+			continue
+		}
+		fileImports[imp.file][local] = goBinding{dir: dir, ok: ok}
+	}
+	return fileImports, dotImports
+}
+
+func pathBase(importPath string) string {
+	importPath = strings.Trim(importPath, "/")
+	if i := strings.LastIndex(importPath, "/"); i >= 0 {
+		return importPath[i+1:]
+	}
+	return importPath
+}
+
+// matchGoDir finds the snapshot directory an import path refers to. The
+// longest directory that is the import path, or a slash-bounded suffix of
+// it, wins. Two matches of that length stay unresolved.
+func matchGoDir(importPath string, dirs map[string]struct{}) (string, bool) {
+	best := ""
+	bestLen := -1
+	count := 0
+	for dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		if importPath != dir && !strings.HasSuffix(importPath, "/"+dir) {
+			continue
+		}
+		if len(dir) > bestLen {
+			best = dir
+			bestLen = len(dir)
+			count = 1
+			continue
+		}
+		if len(dir) == bestLen {
+			count++
+		}
+	}
+	if count != 1 {
+		return "", false
+	}
+	return best, true
+}
+
+func uniqueDotImport(byPkg map[string][]rawFunc, dirs []string, name string) (rawFunc, bool) {
+	var hit rawFunc
+	n := 0
+	for _, dir := range dirs {
+		fn, ok := uniqueFunc(funcsInDir(byPkg, dir), name, false)
+		if !ok {
+			continue
+		}
+		hit = fn
+		n++
+	}
+	if n == 1 {
+		return hit, true
+	}
+	return rawFunc{}, false
+}
+
+func funcsInDir(byPkg map[string][]rawFunc, dir string) []rawFunc {
+	var out []rawFunc
+	for key, list := range byPkg {
+		got, _, _ := strings.Cut(key, "\x00")
+		if got == dir {
+			out = append(out, list...)
+		}
+	}
+	return out
+}
+
+func (b *builder) resolveGo(call rawCall, byPkg map[string][]rawFunc, fileImports map[string]map[string]goBinding, dotImports map[string][]string) {
 	display := call.name
 	if call.qual != "" {
 		display = call.qual + "." + call.name
@@ -144,18 +263,21 @@ func (b *builder) resolveGo(call rawCall, byPkg map[string][]rawFunc, pkgKeys ma
 	switch {
 	case call.qual == "":
 		target, ok = uniqueFunc(byPkg[pkgKey(call.dir, call.pkg)], call.name, false)
+		if !ok {
+			target, ok = uniqueDotImport(byPkg, dotImports[call.file], call.name)
+		}
 		if !ok && isGoBuiltin(call.name) {
 			return
 		}
-	case len(pkgKeys[call.qual]) == 1:
-		var key string
-		for k := range pkgKeys[call.qual] {
-			key = k
-		}
-		target, ok = uniqueFunc(byPkg[key], call.name, false)
-	case len(pkgKeys[call.qual]) > 1:
-		ok = false
 	default:
+		binding, bound := fileImports[call.file][call.qual]
+		if bound {
+			// The qualifier is this file's import, not a receiver variable.
+			if binding.ok {
+				target, ok = uniqueFunc(funcsInDir(byPkg, binding.dir), call.name, false)
+			}
+			break
+		}
 		target, ok = uniqueFunc(byPkg[pkgKey(call.dir, call.pkg)], call.name, true)
 	}
 	if ok {
