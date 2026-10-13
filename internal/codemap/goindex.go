@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path"
+	"strconv"
 )
 
 func indexGo(rel string, src []byte, b *builder) error {
@@ -22,6 +23,7 @@ func indexGo(rel string, src []byte, b *builder) error {
 	if dir == "." {
 		dir = ""
 	}
+	recordGoImports(rel, file, b)
 
 	type item struct {
 		symbol string
@@ -137,6 +139,30 @@ func indexGo(rel string, src []byte, b *builder) error {
 		})
 	}
 	return nil
+}
+
+func recordGoImports(rel string, file *ast.File, b *builder) {
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			im, ok := spec.(*ast.ImportSpec)
+			if !ok || im.Path == nil {
+				continue
+			}
+			importPath, err := strconv.Unquote(im.Path.Value)
+			if err != nil || importPath == "" {
+				continue
+			}
+			local := ""
+			if im.Name != nil {
+				local = im.Name.Name
+			}
+			b.addGoImport(rel, local, importPath)
+		}
+	}
 }
 
 func receiverType(fn *ast.FuncDecl) string {
