@@ -59,6 +59,22 @@ func main() {
 		}
 	case "review-mcp-schema":
 		err = reviewMCPSchemaCmd(os.Args[2:])
+	case "codemap":
+		if len(os.Args) < 3 {
+			usage()
+			os.Exit(2)
+		}
+		switch os.Args[2] {
+		case "index":
+			err = codemapIndexCmd(os.Args[3:])
+		case "reach":
+			err = codemapReachCmd(os.Args[3:])
+		case "slice":
+			err = codemapSliceCmd(os.Args[3:])
+		default:
+			usage()
+			os.Exit(2)
+		}
 	case "version":
 		fmt.Println("vrh 0.3.0")
 	default:
@@ -77,13 +93,16 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  vrh validate <campaign.yaml>")
 	fmt.Fprintln(os.Stderr, "  vrh snapshot <source-dir> <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh families <add|block|reopen|list|seed> <campaign-dir> ...")
-	fmt.Fprintln(os.Stderr, "  vrh round plan <campaign-dir> <max-workers>")
+	fmt.Fprintln(os.Stderr, "  vrh round plan <campaign-dir> <max-workers> [slice.json]")
 	fmt.Fprintln(os.Stderr, "  vrh round ingest <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh repro <cases.yaml> <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh verify-sandbox <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh adversarial <campaign-dir> <finding-id> <attempts.json> <summary>")
 	fmt.Fprintln(os.Stderr, "  vrh campaign status <campaign-dir>")
 	fmt.Fprintln(os.Stderr, "  vrh review-mcp-schema <tools.json>")
+	fmt.Fprintln(os.Stderr, "  vrh codemap index <campaign-dir>")
+	fmt.Fprintln(os.Stderr, "  vrh codemap reach <campaign-dir> <file#symbol>")
+	fmt.Fprintln(os.Stderr, "  vrh codemap slice <campaign-dir> <file#symbol> [max-files]")
 	fmt.Fprintln(os.Stderr, "  vrh version")
 }
 

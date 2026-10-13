@@ -27,6 +27,10 @@ type roundState struct {
 	MaxWorkers   int      `json:"max_workers"`
 	PendingRound int      `json:"pending_round,omitempty"`
 	PendingPlan  []string `json:"pending_plan,omitempty"`
+	// PendingSlice is the codemap context recorded with PendingPlan, before
+	// any envelope is published. A retry of this round must reproduce it.
+	// A missing or empty slice means the round was recorded with no slice.
+	PendingSlice []string `json:"pending_slice,omitempty"`
 	// PublishedRounds records every round whose dispatch is recorded in the
 	// ledger. It lets a retry detect when a recovered "next" round has itself
 	// been partially or fully published, instead of re-dispatching it.
@@ -369,9 +373,44 @@ func requestGoal(family, mechanism string) string {
 	return "investigate " + family + " via " + mechanism + " for primitives matching the campaign success criterion"
 }
 
+// resolveRoundSlice returns the codemap context for this round. A resumed
+// round reuses the context stored with the pending plan, so a retry that
+// omits the slice file still publishes the same envelopes. Supplying a
+// different slice while that plan is pending is rejected before any write.
+func resolveRoundSlice(dir string, args []string, resuming bool, recorded []string) ([]string, error) {
+	if len(args) == 3 {
+		supplied, err := sliceContext(dir, args[2])
+		if err != nil {
+			return nil, err
+		}
+		if resuming && !sameContext(supplied, recorded) {
+			return nil, errors.New("round plan slice: pending round was recorded with a different slice; retry with that slice or omit it")
+		}
+		if !resuming {
+			return supplied, nil
+		}
+	}
+	if resuming {
+		return recorded, nil
+	}
+	return nil, nil
+}
+
+func sameContext(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func roundPlanCmd(args []string) error {
-	if len(args) != 2 {
-		return errors.New("round plan requires <campaign-dir> <max-workers>")
+	if len(args) != 2 && len(args) != 3 {
+		return errors.New("round plan requires <campaign-dir> <max-workers> [slice.json]")
 	}
 	dir := args[0]
 	if err := requireAdmission(dir); err != nil {
@@ -472,6 +511,7 @@ func roundPlanCmd(args []string) error {
 		// nothing can be dispatched this round, so clear it rather than loop.
 		state.PendingRound = 0
 		state.PendingPlan = nil
+		state.PendingSlice = nil
 		if err := saveRoundState(files["state"], state); err != nil {
 			return err
 		}
@@ -492,6 +532,7 @@ func roundPlanCmd(args []string) error {
 		state.Round = coord.Round + 1
 		state.PendingRound = 0
 		state.PendingPlan = nil
+		state.PendingSlice = nil
 		if err := saveRoundState(files["state"], state); err != nil {
 			return err
 		}
@@ -502,11 +543,20 @@ func roundPlanCmd(args []string) error {
 		return nil
 	}
 
-	// Record the plan durably BEFORE publishing anything, so a crash leaves
-	// the exact family set recoverable.
-	if state.PendingRound != coord.Round || len(state.PendingPlan) == 0 {
+	resuming := state.PendingRound == coord.Round && len(state.PendingPlan) > 0
+	sliceLines, err := resolveRoundSlice(dir, args, resuming, state.PendingSlice)
+	if err != nil {
+		return err
+	}
+
+	// Record the plan and its slice durably BEFORE publishing anything, so a
+	// crash leaves the exact family set and worker context recoverable. A
+	// later retry that omits the slice reuses this record; a different slice
+	// is rejected before any envelope is written.
+	if !resuming {
 		state.PendingRound = coord.Round
 		state.PendingPlan = plan
+		state.PendingSlice = sliceLines
 		if err := saveRoundState(files["state"], state); err != nil {
 			return err
 		}
@@ -522,12 +572,16 @@ func roundPlanCmd(args []string) error {
 			return fmt.Errorf("approach family %q has no registered mechanism", family)
 		}
 		requestID := fmt.Sprintf("%s--r%d", family, coord.Round)
+		context := []string{approach.Mechanism}
+		if len(sliceLines) > 0 {
+			context = append(context, sliceLines...)
+		}
 		request := worker.Request{
 			ID:      requestID,
 			Round:   coord.Round,
 			Family:  family,
 			Goal:    requestGoal(family, approach.Mechanism),
-			Context: []string{approach.Mechanism},
+			Context: context,
 		}
 		digest, err := inbox.Publish(request)
 		if err != nil {
@@ -561,6 +615,7 @@ func roundPlanCmd(args []string) error {
 		state.Round = coord.Round + 1
 		state.PendingRound = 0
 		state.PendingPlan = nil
+		state.PendingSlice = nil
 		if err := saveRoundState(files["state"], state); err != nil {
 			return err
 		}
