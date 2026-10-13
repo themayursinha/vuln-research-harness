@@ -10,6 +10,8 @@
 package codemap
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 )
 
@@ -582,15 +585,54 @@ func rejectSymlinkComponents(root, rel string) error {
 }
 
 func writeAtomic(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	// A predictable sidecar such as codemap.json.tmp can be a symlink into
+	// the pinned source tree. Open a new name with O_EXCL|O_NOFOLLOW so an
+	// existing symlink is never followed or replaced.
+	f, err := exclusiveTemp(dir)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	tmpName := f.Name()
+	remove := true
+	defer func() {
+		if remove {
+			os.Remove(tmpName)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
 		return err
 	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	remove = false
 	return nil
+}
+
+func exclusiveTemp(dir string) (*os.File, error) {
+	var random [8]byte
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL | syscall.O_NOFOLLOW
+	for attempt := 0; attempt < 100; attempt++ {
+		if _, err := rand.Read(random[:]); err != nil {
+			return nil, err
+		}
+		name := filepath.Join(dir, ".vrh-"+hex.EncodeToString(random[:]))
+		f, err := os.OpenFile(name, flags, 0600)
+		if err == nil {
+			return f, nil
+		}
+		if os.IsExist(err) {
+			continue
+		}
+		return nil, err
+	}
+	return nil, errors.New("could not create temp file")
 }
