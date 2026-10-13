@@ -509,8 +509,8 @@ func identOnly(s string) bool {
 func blankPython(src string) (string, error) {
 	b := []byte(src)
 	for i := 0; i < len(b); {
-		if content, quote, triple, ok := pythonQuoteAt(b, i); ok {
-			next, err := blankPythonString(b, i, content, quote, triple)
+		if content, quote, triple, fstring, ok := pythonQuoteAt(b, i); ok {
+			next, err := blankPythonString(b, i, content, quote, triple, fstring)
 			if err != nil {
 				return "", err
 			}
@@ -538,32 +538,37 @@ func validPyPrefix(s string) bool {
 	}
 }
 
-func pythonQuoteAt(b []byte, i int) (content int, quote byte, triple, ok bool) {
+func pythonQuoteAt(b []byte, i int) (content int, quote byte, triple, fstring, ok bool) {
 	if i > 0 && isPyIdent(b[i-1]) {
-		return 0, 0, false, false
+		return 0, 0, false, false, false
 	}
 	for n := 2; n >= 0; n-- {
 		if i+n >= len(b) {
 			continue
 		}
-		if n > 0 && !validPyPrefix(string(b[i:i+n])) {
-			continue
+		prefix := ""
+		if n > 0 {
+			prefix = string(b[i : i+n])
+			if !validPyPrefix(prefix) {
+				continue
+			}
 		}
 		if b[i+n] != '\'' && b[i+n] != '"' {
 			continue
 		}
 		quote = b[i+n]
 		triple = i+n+2 < len(b) && b[i+n+1] == quote && b[i+n+2] == quote
-		return i + n, quote, triple, true
+		fstring = strings.Contains(strings.ToLower(prefix), "f")
+		return i + n, quote, triple, fstring, true
 	}
-	return 0, 0, false, false
+	return 0, 0, false, false, false
 }
 
 func isPyIdent(c byte) bool {
 	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
-func blankPythonString(b []byte, i, content int, quote byte, triple bool) (int, error) {
+func blankPythonString(b []byte, i, content int, quote byte, triple, fstring bool) (int, error) {
 	qlen := 1
 	if triple {
 		qlen = 3
@@ -575,6 +580,9 @@ func blankPythonString(b []byte, i, content int, quote byte, triple bool) (int, 
 	k := endQuote
 	if k > len(b) {
 		return len(b), nil
+	}
+	if fstring {
+		return blankFStringLiteral(b, k, quote, triple)
 	}
 	if triple {
 		for k < len(b) {
@@ -618,6 +626,160 @@ func blankPythonString(b []byte, i, content int, quote byte, triple bool) (int, 
 		k++
 	}
 	return k, nil
+}
+
+// blankFStringLiteral blanks the literal parts of an f-string and leaves
+// replacement fields scannable. {{ and }} are literal braces. A backslash
+// does not hide a replacement field.
+func blankFStringLiteral(b []byte, k int, quote byte, triple bool) (int, error) {
+	for k < len(b) {
+		if closed, next := closePythonString(b, k, quote, triple); closed {
+			return next, nil
+		}
+		if b[k] == '\\' && k+1 < len(b) {
+			b[k] = ' '
+			k++
+			if b[k] != '{' && b[k] != '}' {
+				if b[k] != '\n' {
+					b[k] = ' '
+				}
+				k++
+			}
+			continue
+		}
+		if b[k] == '{' && k+1 < len(b) && b[k+1] == '{' {
+			b[k], b[k+1] = ' ', ' '
+			k += 2
+			continue
+		}
+		if b[k] == '}' && k+1 < len(b) && b[k+1] == '}' {
+			b[k], b[k+1] = ' ', ' '
+			k += 2
+			continue
+		}
+		if b[k] == '{' {
+			b[k] = ' '
+			k++
+			next, err := blankFExpr(b, k)
+			if err != nil {
+				return 0, err
+			}
+			k = next
+			continue
+		}
+		if b[k] != '\n' {
+			b[k] = ' '
+		}
+		k++
+	}
+	return 0, errors.New("unclosed f-string")
+}
+
+func closePythonString(b []byte, k int, quote byte, triple bool) (bool, int) {
+	if triple {
+		if k+2 < len(b) && b[k] == quote && b[k+1] == quote && b[k+2] == quote {
+			b[k], b[k+1], b[k+2] = ' ', ' ', ' '
+			return true, k + 3
+		}
+		return false, k
+	}
+	if b[k] == quote {
+		b[k] = ' '
+		return true, k + 1
+	}
+	return false, k
+}
+
+// blankFExpr scans one f-string replacement field. The expression text stays
+// in place. Strings, nested f-strings, and nested braces are honored so a
+// "}" inside them does not end the field. The closing "}" is blanked.
+func blankFExpr(b []byte, i int) (int, error) {
+	paren, bracket, brace := 0, 0, 0
+	for i < len(b) {
+		if content, quote, triple, fstring, ok := pythonQuoteAt(b, i); ok {
+			next, err := blankPythonString(b, i, content, quote, triple, fstring)
+			if err != nil {
+				return 0, err
+			}
+			i = next
+			continue
+		}
+		switch b[i] {
+		case '(':
+			paren++
+		case ')':
+			if paren > 0 {
+				paren--
+			}
+		case '[':
+			bracket++
+		case ']':
+			if bracket > 0 {
+				bracket--
+			}
+		case '{':
+			brace++
+		case '}':
+			if paren == 0 && bracket == 0 && brace == 0 {
+				b[i] = ' '
+				return i + 1, nil
+			}
+			if brace > 0 {
+				brace--
+			}
+		case ':', '!':
+			if paren == 0 && bracket == 0 && brace == 0 {
+				if b[i] == '!' {
+					b[i] = ' '
+					i++
+					if i < len(b) && (b[i] == 'r' || b[i] == 's' || b[i] == 'a') {
+						b[i] = ' '
+						i++
+					}
+					continue
+				}
+				b[i] = ' '
+				i++
+				return blankFFormat(b, i)
+			}
+		}
+		i++
+	}
+	return 0, errors.New("unclosed f-string replacement")
+}
+
+func blankFFormat(b []byte, i int) (int, error) {
+	for i < len(b) {
+		if b[i] == '{' && i+1 < len(b) && b[i+1] == '{' {
+			b[i], b[i+1] = ' ', ' '
+			i += 2
+			continue
+		}
+		if b[i] == '}' && i+1 < len(b) && b[i+1] == '}' {
+			b[i], b[i+1] = ' ', ' '
+			i += 2
+			continue
+		}
+		if b[i] == '{' {
+			b[i] = ' '
+			i++
+			next, err := blankFExpr(b, i)
+			if err != nil {
+				return 0, err
+			}
+			i = next
+			continue
+		}
+		if b[i] == '}' {
+			b[i] = ' '
+			return i + 1, nil
+		}
+		if b[i] != '\n' {
+			b[i] = ' '
+		}
+		i++
+	}
+	return 0, errors.New("unclosed f-string replacement")
 }
 
 func blankJS(src string) (string, error) {
